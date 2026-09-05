@@ -8,6 +8,10 @@ WinForms, giao diện thẻ với cửa sổ thêm tài khoản/cài đặt riê
 
 Dự án độc lập, không phải sản phẩm chính thức của OpenAI.
 
+![Codex Account Manager quản lý nhiều tài khoản và mở các phiên Codex CLI riêng biệt](assets/showcase.jpg)
+
+Quản lý tài khoản, theo dõi quota và mở nhiều phiên Codex CLI từ một giao diện gọn nhẹ.
+
 ## Chạy bản portable
 
 Tải ZIP ở trang Releases, giải nén vào thư mục riêng có quyền ghi và chạy `CodexAccountManager.exe`.
