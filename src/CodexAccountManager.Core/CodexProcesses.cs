@@ -7,7 +7,7 @@ public sealed record Dependencies(string? PowerShell, string? Codex, bool LoginS
 {
     public void Require()
     {
-        if (PowerShell is null) throw new IOException("Không tìm thấy PowerShell. Cài PowerShell 7 hoặc bật Windows PowerShell, rồi Refresh.");
+        if (PowerShell is null) throw new IOException("PowerShell not found. Install PowerShell 7 or enable Windows PowerShell, then Refresh.");
         if (Codex is null) throw new IOException("Codex CLI was not found. Install the official CLI or add it to PATH, then Refresh.");
     }
 }

@@ -3,6 +3,8 @@
 Ứng dụng Windows desktop portable quản lý nhiều profile Codex CLI. C#/.NET 8,
 WinForms, giao diện thẻ với cửa sổ thêm tài khoản/cài đặt riêng; không installer/service.
 
+Từ v1.4.0, giao diện app sử dụng **English**. Tên/note tài khoản do người dùng nhập giữ nguyên.
+
 [Tải bản mới nhất](https://github.com/valentine-89/codex-cli-hub/releases/latest) ·
 [Changelog](CHANGELOG.md) · [Đóng góp](CONTRIBUTING.md) · [Bảo mật](SECURITY.md) · [MIT](LICENSE)
 
@@ -27,21 +29,21 @@ và tự cài đặt. App không tự cài phần mềm hoặc tạo yêu cầu 
 Đặt app trên ổ NTFS local có quyền ghi, không đặt dưới Program Files,
 thư mục junction/symlink, network share hoặc thư mục shared sessions.
 
-1. Bấm **Thêm tài khoản**; nhập tên và ghi chú tùy chọn.
-2. Chọn **Đăng nhập mới** hoặc **Sao chép tài khoản Codex gốc**.
+1. Bấm **Add account**; nhập tên và ghi chú tùy chọn.
+2. Chọn **New login** hoặc **Copy default Codex account**.
 3. Đăng nhập mới mở terminal `codex login`; terminal tự đóng khi thành công, giữ lại khi lỗi. Chế độ sao chép lấy riêng `auth.json` từ Codex Home gốc,
    không mở login và không sửa file nguồn. Thiếu auth.json (ví dụ credential chỉ nằm trong keyring)
    thì báo lỗi; không tự chọn phương thức khác.
 4. Cả hai cách đều sao chép `config.toml` gốc nếu có, sau đó ghi root setting
    `cli_auth_credentials_store = "file"`. Các cài đặt khác và comment giữ nguyên.
    File nguồn không tồn tại thì tạo config tối thiểu cho profile mới.
-5. Mỗi thẻ có **Open**, **Refresh**, **Apply**; menu **•••** chứa Đăng nhập lại, Resume, Mở thư mục, Chi tiết và Xóa.
-   Chọn **Chi tiết** để sửa tên/ghi chú và bấm **Lưu**; thẻ cập nhật ngay, giữ nguyên phiên login.
-6. **Cài đặt** mở cửa sổ nâng cao: Codex Home gốc, thư mục làm việc, đường dẫn CLI/PowerShell và link .NET.
+5. Mỗi thẻ có **Open**, **Refresh**, **Apply**; menu **•••** chứa Log in again, Resume, Open folder, Details và Delete account.
+   Chọn **Details** để sửa tên/ghi chú và bấm **Save**; thẻ cập nhật ngay, giữ nguyên phiên login.
+6. **Settings** mở cửa sổ nâng cao: Codex Home gốc, thư mục làm việc, đường dẫn CLI/PowerShell và link .NET.
 
 **Open** luôn hiện cửa sổ chọn dự án trước khi mở terminal. Danh sách trích `payload.cwd` trong
 record `session_meta` của các file `.jsonl` dưới sessions gốc, gộp trùng (không phân biệt hoa thường),
-xếp tên repo A–Z, đường dẫn làm thứ tự phụ khi trùng tên; thư mục đã mất nằm cuối. Có ô tìm kiếm và **Thư mục khác…**.
+xếp tên repo A–Z, đường dẫn làm thứ tự phụ khi trùng tên; thư mục đã mất nằm cuối. Có ô tìm kiếm và **Browse…**.
 Thư mục đã mất được đánh dấu và không thể Open. Hủy sẽ không mở terminal; chọn dự án không
 thay đổi cài đặt chung. Catalog chỉ parse phần đầu metadata giới hạn 128 KiB mỗi file,
 không duyệt qua junction con hoặc đọc nội dung hội thoại để suy đoán dự án.
@@ -137,7 +139,7 @@ Apply dành cho đăng nhập dùng `auth.json`; không chuyển đổi credenti
 
 ## Xóa account và gỡ app
 
-Đóng mọi terminal dùng profile. Chọn **••• → Xóa tài khoản**, đọc tên và đường dẫn trong confirmation.
+Đóng mọi terminal dùng profile. Chọn **••• → Delete account**, đọc tên và đường dẫn trong confirmation.
 Manager chặn terminal đang theo dõi còn chạy; sau restart cần người dùng đảm bảo đóng cả
 terminal cũ hoặc được mở thủ công. Manager không force-kill Codex.
 

@@ -24,10 +24,10 @@ public static class CredentialConfig
                 var match = Assignment.Match(text, i);
                 if (match.Success)
                 {
-                    if (foundStart >= 0) throw new IOException("config.toml có khóa credential store trùng lặp; chưa sửa file.");
+                    if (foundStart >= 0) throw new IOException("config.toml has duplicate credential store keys; file was not changed.");
                     foundStart = i + match.Length;
                     if (foundStart >= text.Length || text[foundStart] is not ('\'' or '"'))
-                        throw new IOException("Giá trị credential store trong config.toml không phải chuỗi; chưa sửa file.");
+                        throw new IOException("Credential store value in config.toml is not a string; file was not changed.");
                     foundEnd = SkipString(text, foundStart);
                     i = foundEnd; lineStart = false; continue;
                 }
@@ -60,7 +60,7 @@ public static class CredentialConfig
                 return end;
             }
         }
-        throw new IOException("config.toml chứa chuỗi chưa đóng; chưa sửa file.");
+        throw new IOException("config.toml contains an unterminated string; file was not changed.");
     }
 
     public static void EnsureFile(string profile)

@@ -11,7 +11,7 @@ public sealed class AccountDetailsForm : Form
 
     public AccountDetailsForm(Account account, string profilePath, string sessionsPath)
     {
-        Theme.SetupDialog(this, "Chi tiết tài khoản", new Size(540, 365));
+        Theme.SetupDialog(this, "Account details", new Size(540, 365));
         name.Text = account.DisplayName; note.Text = account.Note;
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(22, 14, 22, 14), ColumnCount = 1 };
         void Row(Control control, int height)
@@ -20,8 +20,8 @@ public sealed class AccountDetailsForm : Form
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
             layout.Controls.Add(control, 0, row);
         }
-        Row(Theme.Label("Tên tài khoản"), 25); Row(name, 36);
-        Row(Theme.Label("Ghi chú"), 25); Row(note, 36);
+        Row(Theme.Label("Account name"), 25); Row(name, 36);
+        Row(Theme.Label("Note"), 25); Row(note, 36);
         void Detail(string label, string value)
         {
             Row(Theme.Label(label), 22);
@@ -29,7 +29,7 @@ public sealed class AccountDetailsForm : Form
         }
         Detail("ID", account.Id); Detail("Codex Home", profilePath); Detail("Sessions", sessionsPath);
         var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, WrapContents = false };
-        var save = Theme.Button("Lưu", true); var cancel = Theme.Button("Hủy"); cancel.DialogResult = DialogResult.Cancel;
+        var save = Theme.Button("Save", true); var cancel = Theme.Button("Cancel"); cancel.DialogResult = DialogResult.Cancel;
         save.Click += (_, _) =>
         {
             if (string.IsNullOrWhiteSpace(name.Text)) { name.Focus(); name.BackColor = Color.MistyRose; return; }

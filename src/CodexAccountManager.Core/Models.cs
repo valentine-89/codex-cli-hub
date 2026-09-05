@@ -37,13 +37,32 @@ public sealed record QuotaLine(string Title, double? RemainingPercent, long? Res
 {
     public string Display()
     {
-        var value = RemainingPercent is double remaining ? $"còn {remaining:0.#}%" : Detail ?? "Không có dữ liệu";
+        var value = RemainingPercent is double remaining ? $"{remaining:0.#}% left" : EnglishLabel(Detail ?? "No data");
         string reset = "";
         if (ResetsAt is long seconds)
         {
             try { reset = " · reset " + DateTimeOffset.FromUnixTimeSeconds(seconds).ToLocalTime().ToString("dd/MM HH:mm"); }
-            catch (ArgumentOutOfRangeException) { reset = " · reset không xác định"; }
+            catch (ArgumentOutOfRangeException) { reset = " · reset unknown"; }
         }
-        return $"{Title}: {value}{reset}";
+        var separator = Title.LastIndexOf(" · ", StringComparison.Ordinal);
+        var title = separator < 0 ? EnglishLabel(Title) : Title[..(separator + 3)] + EnglishLabel(Title[(separator + 3)..]);
+        return $"{title}: {value}{reset}";
+    }
+
+    // Translate app-generated cached labels without altering account data or server bucket names.
+    private static string EnglishLabel(string text)
+    {
+        var translated = text switch
+        {
+            "Tuần" => "Weekly", "Lượt reset" => "Reset count", "Chi tiêu" => "Spending",
+            "Đã dùng / hạn mức" => "Used / limit", "Đã chạm hạn mức" => "Limit reached",
+            "Giới hạn chi tiêu" => "Spending limit", "Không giới hạn" => "Unlimited",
+            "Không có credits" => "No credits", "Chưa có số dư" => "Balance unavailable",
+            "Không có dữ liệu" => "No data", _ => text
+        };
+        foreach (var (suffix, unit) in new[] { (" ngày", "days"), (" giờ", "hours"), (" phút", "minutes") })
+            if (translated.EndsWith(suffix, StringComparison.Ordinal) && long.TryParse(translated[..^suffix.Length], out var duration))
+                return $"{duration} {unit}";
+        return translated;
     }
 }

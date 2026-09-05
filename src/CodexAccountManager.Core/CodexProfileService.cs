@@ -23,7 +23,7 @@ public sealed class CodexProfileService(string root, JunctionService junctions)
         PathSafety.NoReparseAncestors(configSource);
         if (copyDefaultAccount) PathSafety.NoReparseAncestors(authSource);
         if (copyDefaultAccount && !File.Exists(authSource))
-            throw new IOException("Codex gốc chưa có auth.json để sao chép. Hãy chọn đăng nhập mới hoặc đăng nhập Codex gốc trước.");
+            throw new IOException("Default Codex has no auth.json to copy. Choose New login or log in to default Codex first.");
         using var config = File.Exists(configSource) ? new FileStream(configSource, FileMode.Open, FileAccess.Read, FileShare.Read) : null;
         using var auth = copyDefaultAccount ? new FileStream(authSource, FileMode.Open, FileAccess.Read, FileShare.Read) : null;
         var account = new Account { DisplayName = name.Trim(), Note = note.Trim() };
@@ -67,7 +67,7 @@ public sealed class CodexProfileService(string root, JunctionService junctions)
         var source = Path.Combine(profile, "auth.json");
         var target = Path.Combine(home, "auth.json");
         PathSafety.NoReparseAncestors(source); PathSafety.NoReparseAncestors(target);
-        if (!File.Exists(source)) throw new IOException("Tài khoản chưa có auth.json. Hãy đăng nhập trước khi Apply.");
+        if (!File.Exists(source)) throw new IOException("This account has no auth.json. Log in before Apply.");
         using var sourcePin = JunctionService.PinDirectory(profile);
         using var targetPin = JunctionService.PinDirectory(home, allowWrites: true);
         var temporary = Path.Combine(home, ".codex-account-manager-" + Guid.NewGuid().ToString("N") + ".tmp");
@@ -81,9 +81,9 @@ public sealed class CodexProfileService(string root, JunctionService junctions)
                 using var check = File.OpenRead(temporary);
                 using var json = System.Text.Json.JsonDocument.Parse(check);
                 if (json.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object)
-                    throw new IOException("Auth của tài khoản không hợp lệ; chưa thay đổi phiên chính.");
+                    throw new IOException("Invalid account authentication; default login was not changed.");
             }
-            catch (System.Text.Json.JsonException) { throw new IOException("Auth của tài khoản không hợp lệ; chưa thay đổi phiên chính."); }
+            catch (System.Text.Json.JsonException) { throw new IOException("Invalid account authentication; default login was not changed."); }
             PathSafety.NoReparseAncestors(target);
             if (File.Exists(target)) File.Replace(temporary, target, null);
             else File.Move(temporary, target);

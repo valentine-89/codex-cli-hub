@@ -8,7 +8,7 @@ public sealed class CodexQuotaService
 {
     public async Task<QuotaSnapshot> ReadAsync(Dependencies dependencies, string home, CancellationToken cancellationToken = default)
     {
-        if (dependencies.NativeCodex is null) throw new IOException("Không tìm thấy Codex executable để đọc quota chính thức.");
+        if (dependencies.NativeCodex is null) throw new IOException("Codex executable not found for quota queries.");
         PathSafety.OrdinaryDirectory(home);
         var info = new ProcessStartInfo(dependencies.NativeCodex)
         {
@@ -20,7 +20,7 @@ public sealed class CodexQuotaService
         info.ArgumentList.Add("app-server"); info.ArgumentList.Add("--listen"); info.ArgumentList.Add("stdio://");
         foreach (var key in ShellRunner.IsolatedEnvironmentVariables) info.Environment.Remove(key);
         info.Environment["CODEX_HOME"] = home;
-        using var process = Process.Start(info) ?? throw new IOException("Không khởi chạy được bộ đọc quota.");
+        using var process = Process.Start(info) ?? throw new IOException("Could not start the quota reader.");
         // Drain diagnostics without retaining or logging raw content.
         var diagnostics = Drain(process.StandardError);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -34,7 +34,7 @@ public sealed class CodexQuotaService
             return Parse(await Receive(2));
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        { throw new TimeoutException("Đọc quota quá 30 giây. Hãy Refresh lại."); }
+        { throw new TimeoutException("Quota request timed out after 30 seconds. Please Refresh."); }
         finally
         {
             process.StandardInput.Close();
@@ -54,16 +54,16 @@ public sealed class CodexQuotaService
             while (true)
             {
                 var line = await process.StandardOutput.ReadLineAsync(timeout.Token);
-                if (line is null) throw new IOException("Codex đã đóng kết nối quota trước khi trả dữ liệu.");
+                if (line is null) throw new IOException("Codex closed the quota connection before returning data.");
                 using var message = JsonDocument.Parse(line);
                 var value = message.RootElement;
                 if (!value.TryGetProperty("id", out var responseId) || responseId.ValueKind != JsonValueKind.Number || !responseId.TryGetInt32(out var number) || number != id) continue;
                 if (value.TryGetProperty("error", out var error))
                 {
                     var code = error.TryGetProperty("code", out var codeValue) ? codeValue.ToString() : "unknown";
-                    throw new IOException($"Không đọc được quota (Codex {code}). Kiểm tra đăng nhập/kết nối rồi Refresh.");
+                    throw new IOException($"Could not read quota (Codex {code}). Check login and connection, then Refresh.");
                 }
-                if (!value.TryGetProperty("result", out var result)) throw new IOException("Phản hồi quota không hợp lệ.");
+                if (!value.TryGetProperty("result", out var result)) throw new IOException("Invalid quota response.");
                 return result.Clone();
             }
         }
@@ -83,7 +83,7 @@ public sealed class CodexQuotaService
             AddBucket(single, "codex");
         if (result.TryGetProperty("rateLimitResetCredits", out var resets) && resets.ValueKind == JsonValueKind.Object
             && resets.TryGetProperty("availableCount", out var count) && count.ValueKind == JsonValueKind.Number)
-            snapshot.Lines.Add(new("Lượt reset", null, null, count.ToString()));
+            snapshot.Lines.Add(new("Reset count", null, null, count.ToString()));
         return snapshot;
 
         void AddBucket(JsonElement bucket, string key)
@@ -101,26 +101,26 @@ public sealed class CodexQuotaService
                 var duration = Integer(window, "windowDurationMins");
                 var period = duration switch
                 {
-                    10080 => "Tuần", 300 => "5 giờ", > 0 when duration % 1440 == 0 => $"{duration / 1440} ngày",
-                    > 0 when duration % 60 == 0 => $"{duration / 60} giờ", > 0 => $"{duration} phút", _ => field.Name
+                    10080 => "Weekly", 300 => "5 hours", > 0 when duration % 1440 == 0 => $"{duration / 1440} days",
+                    > 0 when duration % 60 == 0 => $"{duration / 60} hours", > 0 => $"{duration} minutes", _ => field.Name
                 };
                 snapshot.Lines.Add(new(label + " · " + period, remaining, Integer(window, "resetsAt")));
             }
             if (bucket.TryGetProperty("credits", out var credits) && credits.ValueKind == JsonValueKind.Object)
             {
                 var detail = credits.TryGetProperty("unlimited", out var unlimited) && unlimited.ValueKind == JsonValueKind.True
-                    ? "Không giới hạn" : Text(credits, "balance") ?? (credits.TryGetProperty("hasCredits", out var has) && has.ValueKind == JsonValueKind.False ? "Không có credits" : "Chưa có số dư");
+                    ? "Unlimited" : Text(credits, "balance") ?? (credits.TryGetProperty("hasCredits", out var has) && has.ValueKind == JsonValueKind.False ? "No credits" : "Balance unavailable");
                 snapshot.Lines.Add(new(label + " · Credits", null, null, detail));
             }
             if (bucket.TryGetProperty("individualLimit", out var limit) && limit.ValueKind == JsonValueKind.Object)
             {
                 var remaining = limit.TryGetProperty("remainingPercent", out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out var number) ? (double?)number : null;
-                snapshot.Lines.Add(new(label + " · Chi tiêu", remaining, Integer(limit, "resetsAt"), null));
-                snapshot.Lines.Add(new(label + " · Đã dùng / hạn mức", null, null, (Text(limit, "used") ?? "?") + " / " + (Text(limit, "limit") ?? "?")));
+                snapshot.Lines.Add(new(label + " · Spending", remaining, Integer(limit, "resetsAt"), null));
+                snapshot.Lines.Add(new(label + " · Used / limit", null, null, (Text(limit, "used") ?? "?") + " / " + (Text(limit, "limit") ?? "?")));
             }
-            if (Text(bucket, "rateLimitReachedType") is string reached) snapshot.Lines.Add(new(label + " · Đã chạm hạn mức", null, null, reached));
+            if (Text(bucket, "rateLimitReachedType") is string reached) snapshot.Lines.Add(new(label + " · Limit reached", null, null, reached));
             if (bucket.TryGetProperty("spendControlReached", out var spend) && spend.ValueKind == JsonValueKind.True)
-                snapshot.Lines.Add(new(label + " · Giới hạn chi tiêu", null, null, "Đã chạm hạn mức"));
+                snapshot.Lines.Add(new(label + " · Spending limit", null, null, "Limit reached"));
         }
     }
     private static string? Text(JsonElement element, string key) => element.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;

@@ -4,9 +4,9 @@ namespace CodexAccountManager;
 
 public sealed class ProjectPickerForm : Form
 {
-    private readonly TextBox search = new() { Dock = DockStyle.Fill, PlaceholderText = "Tìm thư mục dự án…" };
+    private readonly TextBox search = new() { Dock = DockStyle.Fill, PlaceholderText = "Search project folders…" };
     private readonly ListBox projects = new() { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = BorderStyle.FixedSingle, HorizontalScrollbar = true };
-    private readonly Label status = Theme.Label("Đang đọc danh sách dự án…");
+    private readonly Label status = Theme.Label("Loading projects…");
     private readonly Button open = Theme.Button("Open", true);
     private readonly CancellationTokenSource cancellation = new();
     private readonly string sessionsDirectory;
@@ -17,13 +17,13 @@ public sealed class ProjectPickerForm : Form
     public ProjectPickerForm(string sessionsDirectory, string accountName)
     {
         this.sessionsDirectory = sessionsDirectory;
-        Theme.SetupDialog(this, "Mở dự án · " + accountName, new Size(660, 410));
+        Theme.SetupDialog(this, "Open project · " + accountName, new Size(660, 410));
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(22, 16, 22, 16), ColumnCount = 1, RowCount = 4 };
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38)); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32)); layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, WrapContents = false };
-        var cancel = Theme.Button("Hủy"); cancel.DialogResult = DialogResult.Cancel;
-        var browse = Theme.Button("Thư mục khác…", width: 140);
+        var cancel = Theme.Button("Cancel"); cancel.DialogResult = DialogResult.Cancel;
+        var browse = Theme.Button("Browse…", width: 140);
         actions.Controls.AddRange([open, cancel, browse]);
         layout.Controls.Add(search, 0, 0); layout.Controls.Add(projects, 0, 1); layout.Controls.Add(status, 0, 2); layout.Controls.Add(actions, 0, 3);
         Controls.Add(layout); AcceptButton = open; CancelButton = cancel; open.Enabled = false;
@@ -31,7 +31,7 @@ public sealed class ProjectPickerForm : Form
         open.Click += (_, _) => SelectProject(); projects.DoubleClick += (_, _) => SelectProject();
         browse.Click += (_, _) =>
         {
-            using var dialog = new FolderBrowserDialog { Description = "Chọn thư mục dự án", UseDescriptionForTitle = true };
+            using var dialog = new FolderBrowserDialog { Description = "Select project folder", UseDescriptionForTitle = true };
             if (dialog.ShowDialog(this) == DialogResult.OK) Finish(dialog.SelectedPath);
         };
         Shown += (_, _) => Ready = LoadProjects();
@@ -45,10 +45,10 @@ public sealed class ProjectPickerForm : Form
             var result = await Task.Run(() => new SessionProjectCatalog().Read(sessionsDirectory, token));
             if (IsDisposed || cancellation.IsCancellationRequested) return;
             catalog = result.Projects; Filter();
-            status.Text = $"{catalog.Count} thư mục từ session gốc" + (result.SkippedFiles > 0 ? $" · Bỏ qua {result.SkippedFiles} mục không đọc được" : "");
+            status.Text = $"{catalog.Count} folders from default sessions" + (result.SkippedFiles > 0 ? $" · Skipped {result.SkippedFiles} unreadable items" : "");
         }
         catch (OperationCanceledException) { }
-        catch (Exception) { if (!IsDisposed) status.Text = "Không đọc được session gốc. Bạn có thể chọn thư mục khác."; }
+        catch (Exception) { if (!IsDisposed) status.Text = "Could not read default sessions. Browse for a folder instead."; }
     }
     private void Filter()
     {
@@ -65,7 +65,7 @@ public sealed class ProjectPickerForm : Form
     private void Finish(string path)
     {
         try { PathSafety.OrdinaryDirectory(path); SelectedDirectory = PathSafety.Canonical(path); DialogResult = DialogResult.OK; }
-        catch (IOException ex) { MessageBox.Show(this, ex.Message, "Không mở được thư mục", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+        catch (IOException ex) { MessageBox.Show(this, ex.Message, "Cannot open folder", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
     }
     protected override void Dispose(bool disposing)
     {

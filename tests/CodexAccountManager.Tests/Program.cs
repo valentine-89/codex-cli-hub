@@ -147,8 +147,8 @@ Test("quota weekly-only does not invent a five-hour window", () =>
      "rateLimits":{"limitId":"codex","primary":null,"secondary":{"usedPercent":21,"windowDurationMins":10080,"resetsAt":1900000000}}}
     """);
     var quota = CodexQuotaService.Parse(json.RootElement);
-    Assert(quota.Lines.Count == 1 && quota.Lines[0].Title.Contains("Tuần") && quota.Lines[0].RemainingPercent == 79, "Weekly quota missing/duplicated");
-    Assert(!quota.Lines.Any(l => l.Title.Contains("5 giờ")), "Invented short quota");
+    Assert(quota.Lines.Count == 1 && quota.Lines[0].Title.Contains("Weekly") && quota.Lines[0].RemainingPercent == 79, "Weekly quota missing/duplicated");
+    Assert(!quota.Lines.Any(l => l.Title.Contains("5 hours")), "Invented short quota");
 });
 Test("quota includes all buckets, credits, spend limits and reset count", () =>
 {
@@ -161,7 +161,7 @@ Test("quota includes all buckets, credits, spend limits and reset count", () =>
     var quota = CodexQuotaService.Parse(json.RootElement);
     Assert(quota.Lines.Count == 7, "Quota fields were dropped");
     Assert(quota.Lines.Any(l => l.Title.Contains("Review") && l.RemainingPercent == 0), "Other bucket missing");
-    Assert(quota.Lines.Any(l => l.Detail == "12.50") && quota.Lines.Any(l => l.Title == "Lượt reset" && l.Detail == "2"), "Credits missing");
+    Assert(quota.Lines.Any(l => l.Detail == "12.50") && quota.Lines.Any(l => l.Title == "Reset count" && l.Detail == "2"), "Credits missing");
 });
 Test("quota period is based on duration, missing metrics stay unavailable", () =>
 {
@@ -169,7 +169,7 @@ Test("quota period is based on duration, missing metrics stay unavailable", () =
     {"rateLimits":{"limitId":"codex","primary":{"usedPercent":null,"windowDurationMins":10080,"resetsAt":null},"secondary":null}}
     """);
     var quota = CodexQuotaService.Parse(json.RootElement);
-    Assert(quota.Lines.Count == 1 && quota.Lines[0].Title.Contains("Tuần") && quota.Lines[0].RemainingPercent is null, "Null usage treated as zero or wrong period");
+    Assert(quota.Lines.Count == 1 && quota.Lines[0].Title.Contains("Weekly") && quota.Lines[0].RemainingPercent is null, "Null usage treated as zero or wrong period");
 });
 tests.Add(("Windows PowerShell fallback preserves Unicode native stdin and stdout", async () =>
 {
@@ -308,8 +308,8 @@ Test("WinForms renders populated and empty account lists", () =>
 {
     var f = Fixture(); var a = f.Create("Work account — thử nghiệm"); var b = f.Create("Personal account");
     a.LoginStatus = "Logged in (local credentials)"; a.LastCheckedAt = DateTimeOffset.Now;
-    a.Quota = new QuotaSnapshot { Lines = [new("codex · Tuần", 72, 1900000000)] };
-    b.Quota = new QuotaSnapshot { Lines = [new("codex · 5 giờ", 95, 1900000000), new("codex · Tuần", 81, 1901000000), new("Review · Tuần", 44, 1901000000)] };
+    a.Quota = new QuotaSnapshot { Lines = [new("codex · Weekly", 72, 1900000000)] };
+    b.Quota = new QuotaSnapshot { Lines = [new("codex · 5 hours", 95, 1900000000), new("codex · Weekly", 81, 1901000000), new("Review · Weekly", 44, 1901000000)] };
     a.Note = "UI fixture — no real credentials";
     var repo = new AccountRepository(f.App); repo.SaveSettings(f.Settings);
     repo.SaveAccounts(new AccountDocument { Accounts = [a, b] });
@@ -412,6 +412,13 @@ tests.Add(("official CLI status against a fresh isolated profile", async () =>
     Assert(File.ReadAllText(f.Sentinel) == "shared-do-not-delete", "Shared fixture changed");
 }));
 
+Test("cached quota labels render in English without mutating stored values", () =>
+{
+    var line = new QuotaLine("Tên bucket · Tuần", 72, null);
+    Assert(line.Display() == "Tên bucket · Weekly: 72% left" && line.Title == "Tên bucket · Tuần", "Cached quota or server bucket changed");
+    Assert(new QuotaLine("codex · 5 giờ", null, null, "Không có dữ liệu").Display() == "codex · 5 hours: No data", "Cached duration not translated");
+    Assert(new QuotaLine("Lượt reset", null, null, "2").Display() == "Reset count: 2", "Cached reset label not translated");
+});
 var failures = 0;
 try
 {

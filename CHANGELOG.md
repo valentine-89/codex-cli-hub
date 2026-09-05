@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4.0 — 2026-09-06
+
+- Switch all app labels, menus, dialogs, errors and quota text to English.
+- Render previously cached quota labels in English without changing stored account names or notes.
+
 ## 1.3.0 — 2026-09-05
 
 - Edit account name and note through the Details dialog.

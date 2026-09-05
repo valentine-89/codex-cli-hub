@@ -1,8 +1,8 @@
-# Validation — v1.3, 2026-09-05
+# Validation — v1.4, 2026-09-06
 
 - Windows x64, SDK 8.0.424, Codex CLI 0.153.4.
-- Release build: zero warnings/errors; **34/34 tests passed**.
-- Framework-dependent single executable: **295,059 bytes**. Published executable startup: exit 0.
+- Release build: zero warnings/errors; **35/35 tests passed**.
+- Framework-dependent single executable: **296,083 bytes**. Published executable startup: exit 0.
 - Details dialog now edits name/note, saves metadata atomically and rolls back in-memory changes on save failure. Dialog rendering inspected.
 - Login success exits the shell; failure keeps it open. Exit behavior verified with synthetic CLI scripts on PowerShell 7 and 5.1; real browser login remains manual acceptance.
 - Project catalog sorts existing directories by repo name A–Z then full path, with missing directories last. Ordering tested with duplicate repo names.
@@ -19,6 +19,8 @@
 - Repository cleanup removed generated files from explicit bin/obj/artifacts targets without junction traversal.
   Portable executable, real account/profile, config, auth, shared sessions and Git/source retained.
 
+- English cards and all four dialogs rendered and visually inspected. Cached Vietnamese quota labels render in English without altering account names, notes or stored quota values.
+
 ## Remaining acceptance
 Real interactive Apply requires the user to close Codex App/main-account terminals, confirm Apply,
 then reopen Codex. It was intentionally not performed on the actual default account during tests.
@@ -27,7 +29,7 @@ Release ZIP contains only the executable; local profiles and account metadata ar
 
 ## Executable SHA-256
 ```text
-BBBA93F43D1810C2676D55267C62860FAF22E51BAEEB9D4F25C8D0EF2546E9D0
+E9909C60E4C743DAFDAB9DB11BA9B4D8D8483D39E4E074475BB81165F784E6EA
 ```
 
 Protocol source: https://learn.chatgpt.com/docs/app-server
