@@ -1,31 +1,32 @@
-# Validation — 2026-09-05
+# Validation — v1.1, 2026-09-05
 
-- Host: Windows x64; .NET SDK 8.0.424; Codex CLI 0.153.4; PowerShell 7.
-- Release build: passed, zero warnings/errors.
-- Executable integration harness: **18/18 passed**.
-- Real NTFS junction creation/tag/target verified. Shared fixture sentinel content survived deletion.
-- Rejected normal/missing/broken/wrong sessions links, nested/ancestor links and traversal.
-- A native handle with GENERIC_READ and no delete/write sharing blocked directory rename in the test.
-- Official `codex login status` on a newly created test profile: Not logged in. No credentials created.
-- Unicode/shell metacharacter quoting and child environment isolation passed.
-- Invalid JSON preservation, metadata roundtrip and exclusive manager lock passed.
-- WinForms populated/empty layouts rendered and visually inspected. Test records use no real credentials.
-- Self-contained win-x64 folder published to `dist/CodexAccountManager` (~144 MiB).
-- Published executable startup smoke: exit 0. It detects installed CLI/Pwsh and existing default sessions.
-- No real login, logout, default auth/config modification, or shared-session deletion performed.
-- No remote configured: local commit only; push awaits repository URL.
+- Windows x64; .NET SDK 8.0.424; Codex CLI 0.153.4; PowerShell 7.
+- Release build: passed, zero warnings/errors. Integration harness: **24/24 passed**.
+- Published single executable: **264,339 bytes** (~258 KiB), framework-dependent .NET 8 Windows Desktop.
+- Old .NET native/managed/satellite runtime files removed from portable output. Data files retained.
+- Published executable startup on installed .NET 8: exit 0.
+- Logo embedded in executable/title bar/header. Cards, Add Account, Advanced Settings and Project Picker rendered and visually inspected.
+- Project catalog against original sessions: **19 unique project directories**, 35 skipped entries;
+  newest examples included codex-cli-hub, SightCount AI, codex-quota-guard-mcp, PVoil-LED and UlabGuard.
+  No original session content modified. Only metadata cwd is parsed; unsupported/unreadable entries are counted.
+- Tests verify original TOML copied exactly, auth copying requires explicit opt-in, auth copies are independent,
+  source auth survives profile deletion, and missing/locked source auth aborts before profile creation.
+- Existing NTFS safety tests pass: correct tag/target, shared sentinel preservation, wrong/missing/broken links,
+  normal/nested/ancestor directories, path traversal and directory pinning.
+- Session project tests cover deduplication, existence, unrelated record filtering, large metadata and cancellation.
+- Official status on empty isolated profile, quoting/environment isolation, metadata locks and malformed JSON pass.
+- No actual source auth copied during testing. Auth/config copy tests used test-owned fake files only.
 
-## Remaining user acceptance
-Browser login for two actual accounts, simultaneous interactive terminals with their separate identities,
-and successful resume of a representative Codex App session. Sharing filesystem sessions does not
-establish synchronization of each Codex version's private session index/database.
+## Limits
+Real browser login and simultaneous authenticated account use remain user acceptance steps.
+The missing-runtime simulation command was rejected by automatic approval review with `blocked by policy`.
+The app uses the standard .NET GUI apphost prerequisite/download behavior and provides an explicit download
+link in Advanced Settings; that missing-runtime branch was not executed here. No .NET installation was changed.
+No Git remote configured; push awaits repository URL. Portable deployment is local.
 
-## Published application SHA-256
+## Published executable SHA-256
 ```text
-CodexAccountManager.dll
-0EBEED3BA1DAFEC3B93C97755D16408627861021DC87BA92D0EA66F7A0D9AA93
-CodexAccountManager.Core.dll
-1C48FD305EEF494EAD53F924377CCF3657BF141B870401B2B6AE31BC9B562C68
+AD46F79988DC2EFAA730F3A0574A9A14318EEC7AEC318A1E45A9C819E235ED0B
 ```
 
-The .exe is the .NET apphost; the DLL hashes identify the application implementation.
+Runtime installation documentation: https://learn.microsoft.com/en-us/dotnet/core/runtime-discovery/troubleshoot-app-launch

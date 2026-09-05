@@ -1,5 +1,12 @@
 # Implementation plan — 2026-09-05
 
+Historical v1.0 plan. The user-requested v1.1 revision supersedes self-contained packaging,
+single-form/grid UI and the prohibition on explicitly requested auth copying. Current behavior:
+framework-dependent single executable with native missing-runtime download prompt; branded cards;
+Add Account and Advanced Settings dialogs; copy source TOML on creation; optionally copy only
+the default auth.json via locked streams when the user selects that mode. No source modification.
+The path/junction safety and delete rules below remain in force.
+
 ## Verified environment
 - Empty workspace, no Git remote. SDK 8.0.424 available in D:/VSYS/.dotnet-sdk.
 - `codex` resolves through npm codex.ps1; CLI 0.153.4. PowerShell 7 available.

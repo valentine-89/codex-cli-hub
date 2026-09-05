@@ -1,5 +1,13 @@
 using CodexAccountManager.Core;
 
+if (args.Length == 2 && args[0] == "--catalog")
+{
+    var result = new SessionProjectCatalog().Read(args[1]);
+    Console.WriteLine($"Projects: {result.Projects.Count}; skipped entries: {result.SkippedFiles}");
+    foreach (var project in result.Projects.Take(8)) Console.WriteLine($"{project.Directory} (sessions={project.SessionCount}, exists={project.Exists})");
+    return 0;
+}
+
 var root = Path.Combine(Path.GetTempPath(), "CodexManagerTests-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
 var tests = new List<(string Name, Func<Task> Run)>();
@@ -109,6 +117,66 @@ Test("status classification never exposes CLI output", () =>
     Assert(CodexStatusService.Classify(new(1, "Not logged in")) == "Not logged in", "Logged-out classification failed");
     Assert(CodexStatusService.Classify(new(1, "invalid config")) == "Check failed (exit 1)", "Config error called logged-out");
 });
+Test("new login copies original TOML exactly without copying auth", () =>
+{
+    var f = Fixture(); var original = Path.Combine(f.Settings.DefaultCodexHome, "config.toml");
+    var toml = "# Unicode thử nghiệm\r\nmodel = \"example-model\"\r\ncli_auth_credentials_store = \"keyring\"\r\n[mcp_servers.test]\r\ncommand = \"test\"\r\n";
+    File.WriteAllText(original, toml); File.WriteAllText(Path.Combine(f.Settings.DefaultCodexHome, "auth.json"), "test-only");
+    var a = f.Service.Create("New login", "", f.Settings, false);
+    Assert(File.ReadAllText(Path.Combine(f.Path(a), "config.toml")) == toml, "TOML changed during copying");
+    Assert(!File.Exists(Path.Combine(f.Path(a), "auth.json")), "New login copied credentials without opt-in");
+    Assert(File.ReadAllText(original) == toml, "Original config changed");
+});
+Test("explicit account copy creates independent auth and preserves original on delete", () =>
+{
+    var f = Fixture(); var source = Path.Combine(f.Settings.DefaultCodexHome, "auth.json");
+    const string fake = "{\"testOnly\":\"not-a-real-credential\"}"; File.WriteAllText(source, fake);
+    var a = f.Service.Create("Copy", "", f.Settings, true);
+    Assert(File.ReadAllText(Path.Combine(f.Path(a), "auth.json")) == fake, "Auth not copied");
+    File.WriteAllText(Path.Combine(f.Path(a), "auth.json"), "changed-private-copy");
+    Assert(File.ReadAllText(source) == fake, "Auth shares file identity with original");
+    f.Service.Delete(a, f.Settings);
+    Assert(File.ReadAllText(source) == fake && File.Exists(f.Sentinel), "Original damaged by delete");
+});
+Test("missing source auth stops explicit copy before creating profile", () =>
+{
+    var f = Fixture(); Reject(() => f.Service.Create("Copy", "", f.Settings, true));
+    Assert(!Directory.Exists(Path.Combine(f.App, "profiles")), "Created partial profile without source credentials");
+});
+Test("source auth cannot be written while copied", () =>
+{
+    var f = Fixture(); var source = Path.Combine(f.Settings.DefaultCodexHome, "auth.json"); File.WriteAllText(source, "test-only");
+    using var writer = new FileStream(source, FileMode.Open, FileAccess.Write, FileShare.None);
+    Reject(() => f.Service.Create("Copy", "", f.Settings, true));
+    Assert(!Directory.Exists(Path.Combine(f.App, "profiles")), "Created partial profile during source write");
+});
+Test("session projects use metadata cwd, deduplicate and mark missing directories", () =>
+{
+    var f = Fixture(); var project = Path.Combine(f.Root, "Dự án có dấu"); Directory.CreateDirectory(project);
+    var missing = Path.Combine(f.Root, "missing-project");
+    string Header(string path) => System.Text.Json.JsonSerializer.Serialize(new { type = "session_meta", payload = new { cwd = path } });
+    File.WriteAllText(Path.Combine(f.Shared, "one.jsonl"), Header(project) + "\n{broken body ignored");
+    File.WriteAllText(Path.Combine(f.Shared, "two.jsonl"), Header(project.ToUpperInvariant()));
+    File.WriteAllText(Path.Combine(f.Shared, "missing.jsonl"), Header(missing));
+    File.WriteAllText(Path.Combine(f.Shared, "unrelated.jsonl"), System.Text.Json.JsonSerializer.Serialize(new { type = "event_msg", payload = new { cwd = f.App } }));
+    var result = new SessionProjectCatalog().Read(f.Shared);
+    Assert(result.Projects.Count == 2, "Project catalog did not deduplicate/filter metadata");
+    Assert(result.Projects[0].Exists && result.Projects[0].SessionCount == 2, "Existing project not first or incorrect session count");
+    Assert(!result.Projects[1].Exists, "Missing directory not marked");
+});
+Test("session catalog skips nested links and supports large metadata headers", () =>
+{
+    var f = Fixture(); var outside = Path.Combine(f.Root, "external"); Directory.CreateDirectory(outside);
+    f.Junctions.Create(Path.Combine(f.Shared, "link"), outside);
+    var header = System.Text.Json.JsonSerializer.Serialize(new { type = "session_meta", payload = new { cwd = f.App, base_instructions = new string('x', 160000) } });
+    File.WriteAllText(Path.Combine(f.Shared, "large.jsonl"), header);
+    File.WriteAllText(Path.Combine(outside, "hidden.jsonl"), System.Text.Json.JsonSerializer.Serialize(new { type = "session_meta", payload = new { cwd = outside } }));
+    var result = new SessionProjectCatalog().Read(f.Shared);
+    Assert(result.Projects.Count == 1 && PathSafety.Same(result.Projects[0].Directory, f.App), "Catalog followed junction or failed large metadata");
+    using var canceled = new CancellationTokenSource(); canceled.Cancel();
+    try { new SessionProjectCatalog().Read(f.Shared, canceled.Token); throw new Exception("Cancellation ignored"); }
+    catch (OperationCanceledException) { }
+});
 Test("pinned directory cannot be renamed during deletion checks", () =>
 {
     var f = Fixture(); var a = f.Create("A");
@@ -157,6 +225,27 @@ Test("WinForms renders populated and empty account lists", () =>
             using var image = new System.Drawing.Bitmap(empty.Width, empty.Height);
             empty.DrawToBitmap(image, new System.Drawing.Rectangle(0, 0, empty.Width, empty.Height));
             image.Save(System.IO.Path.Combine(output, "ui-empty.png"));
+            void CaptureDialog(Form dialog, string file)
+            {
+                using (dialog)
+                {
+                    dialog.Opacity = 0; dialog.Show(); Application.DoEvents();
+                    if (dialog is CodexAccountManager.ProjectPickerForm picker)
+                    {
+                        var deadline = DateTime.UtcNow.AddSeconds(10);
+                        while (!picker.Ready.IsCompleted && DateTime.UtcNow < deadline) { Application.DoEvents(); Thread.Sleep(10); }
+                        Assert(picker.Ready.IsCompleted, "Project picker did not finish loading");
+                        Application.DoEvents();
+                    }
+                    using var capture = new System.Drawing.Bitmap(dialog.Width, dialog.Height);
+                    dialog.DrawToBitmap(capture, new System.Drawing.Rectangle(0, 0, dialog.Width, dialog.Height));
+                    capture.Save(System.IO.Path.Combine(output, file)); dialog.Close();
+                }
+            }
+            CaptureDialog(new CodexAccountManager.AddAccountForm(), "ui-add-account.png");
+            CaptureDialog(new CodexAccountManager.AdvancedSettingsForm(f.Settings, new(null, null, false)), "ui-settings.png");
+            File.WriteAllText(Path.Combine(f.Shared, "project.jsonl"), System.Text.Json.JsonSerializer.Serialize(new { type = "session_meta", payload = new { cwd = f.App } }));
+            CaptureDialog(new CodexAccountManager.ProjectPickerForm(f.Shared, "Work account"), "ui-project-picker.png");
         }
         catch (Exception ex) { error = ex; }
     });

@@ -11,11 +11,21 @@ public sealed class CodexProfileService(string root, JunctionService junctions)
         return target;
     }
 
-    public Account Create(string name, string note, AppSettings settings)
+    public Account Create(string name, string note, AppSettings settings, bool copyDefaultAccount = false)
     {
         if (string.IsNullOrWhiteSpace(name) || name.Trim().Length > 100 || note.Length > 1000)
             throw new IOException("Enter a name of 1–100 characters and a note up to 1000 characters.");
         var target = SharedTarget(settings);
+        // Open only the explicitly selected source files, never the entire Codex home.
+        // Read sharing prevents concurrent writes while making this snapshot.
+        var configSource = Path.Combine(settings.DefaultCodexHome, "config.toml");
+        var authSource = Path.Combine(settings.DefaultCodexHome, "auth.json");
+        PathSafety.NoReparseAncestors(configSource);
+        if (copyDefaultAccount) PathSafety.NoReparseAncestors(authSource);
+        if (copyDefaultAccount && !File.Exists(authSource))
+            throw new IOException("Codex gốc chưa có auth.json để sao chép. Hãy chọn đăng nhập mới hoặc đăng nhập Codex gốc trước.");
+        using var config = File.Exists(configSource) ? new FileStream(configSource, FileMode.Open, FileAccess.Read, FileShare.Read) : null;
+        using var auth = copyDefaultAccount ? new FileStream(authSource, FileMode.Open, FileAccess.Read, FileShare.Read) : null;
         var account = new Account { DisplayName = name.Trim(), Note = note.Trim() };
         account.ProfilePath = "profiles/" + account.Id;
         var profile = PathSafety.Profile(root, account);
@@ -23,7 +33,17 @@ public sealed class CodexProfileService(string root, JunctionService junctions)
         Directory.CreateDirectory(Path.Combine(root, "profiles"));
         using var parentPin = JunctionService.PinDirectory(Path.Combine(root, "profiles"));
         Directory.CreateDirectory(profile);
-        File.WriteAllText(Path.Combine(profile, "config.toml"), "cli_auth_credentials_store = \"file\"\n");
+        if (config is not null)
+        {
+            using var destination = new FileStream(Path.Combine(profile, "config.toml"), FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            config.CopyTo(destination); destination.Flush(true);
+        }
+        else File.WriteAllText(Path.Combine(profile, "config.toml"), "cli_auth_credentials_store = \"file\"\n");
+        if (auth is not null)
+        {
+            using var destination = new FileStream(Path.Combine(profile, "auth.json"), FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            auth.CopyTo(destination); destination.Flush(true);
+        }
         junctions.Create(Path.Combine(profile, "sessions"), target);
         return account;
     }

@@ -1,24 +1,40 @@
 # Codex Account Manager
 
 Ứng dụng Windows desktop portable quản lý nhiều profile Codex CLI. C#/.NET 8,
-WinForms, một cửa sổ, không installer/service, không cần Administrator.
+WinForms, giao diện thẻ với cửa sổ thêm tài khoản/cài đặt riêng; không installer/service.
 
 ## Chạy bản portable
 
 Mở `dist/CodexAccountManager/CodexAccountManager.exe`. Copy **cả thư mục** để chuyển vị trí.
-Bản self-contained Windows x64 đã chứa .NET runtime; máy đích vẫn cần Codex CLI chính thức
-và PowerShell 7 trong PATH. Đặt app trên ổ NTFS local có quyền ghi, không đặt dưới Program Files,
+Bản **Windows x64 nhẹ, single-file, framework-dependent** không nhúng .NET runtime.
+Máy cần **.NET 8 Desktop Runtime x64**, Codex CLI chính thức và PowerShell 7 trong PATH.
+Nếu thiếu .NET, executable dùng hộp thoại tải runtime của .NET apphost; chọn tải để mở trang Microsoft
+và tự cài đặt. App không tự cài phần mềm hoặc tạo yêu cầu UAC. Trong Cài đặt cũng có link tải
+[.NET 8 Desktop Runtime](https://dotnet.microsoft.com/en-us/download/dotnet/8.0).
+Đặt app trên ổ NTFS local có quyền ghi, không đặt dưới Program Files,
 thư mục junction/symlink, network share hoặc thư mục shared sessions.
 
-1. Kiểm tra Default Codex Home (mặc định `%USERPROFILE%\.codex`) và Working directory.
-2. Nhập Display name, ghi chú tùy chọn; bấm **Add Account**.
-3. Đăng nhập trong terminal PowerShell 7 được mở bằng `codex login`.
-4. Quay lại app, chọn account và bấm **Check**.
-5. **Open Codex** mở terminal riêng; **Resume** chạy `codex resume --all`.
+1. Bấm **Thêm tài khoản**; nhập tên và ghi chú tùy chọn.
+2. Chọn **Đăng nhập mới** hoặc **Sao chép tài khoản Codex gốc**.
+3. Đăng nhập mới mở terminal `codex login`. Chế độ sao chép lấy riêng `auth.json` từ Codex Home gốc,
+   không mở login và không sửa file nguồn. Thiếu auth.json (ví dụ credential chỉ nằm trong keyring)
+   thì báo lỗi; không tự chọn phương thức khác.
+4. Cả hai cách đều sao chép nguyên `config.toml` gốc nếu có. File nguồn không tồn tại thì tạo config
+   tối thiểu cho profile mới. Các đường dẫn và cài đặt trong TOML được giữ nguyên, không tự chuyển đổi.
+5. Mỗi thẻ có **Open**, **Refresh**; menu **•••** chứa Đăng nhập lại, Resume, Mở thư mục, Chi tiết và Xóa.
+6. **Cài đặt** mở cửa sổ nâng cao: Codex Home gốc, thư mục làm việc, đường dẫn CLI/PowerShell và link .NET.
+
+**Open** luôn hiện cửa sổ chọn dự án trước khi mở terminal. Danh sách trích `payload.cwd` trong
+record `session_meta` của các file `.jsonl` dưới sessions gốc, gộp trùng (không phân biệt hoa thường),
+ưu tiên thư mục còn tồn tại rồi phiên mới nhất. Có ô tìm kiếm và **Thư mục khác…**.
+Thư mục đã mất được đánh dấu và không thể Open. Hủy sẽ không mở terminal; chọn dự án không
+thay đổi cài đặt chung. Catalog chỉ parse phần đầu metadata giới hạn 128 KiB mỗi file,
+không duyệt qua junction con hoặc đọc nội dung hội thoại để suy đoán dự án.
+Session lỗi/không có cwd/đường dẫn ngoài định dạng Windows local được bỏ qua và đếm trên dialog.
 
 Có thể mở nhiều account đồng thời. Đóng manager không đóng/kill terminal.
-Không có tự động polling. **Refresh** kiểm tra dependency và junction; **Check** kiểm tra
-login của account được chọn. Hover status bar để xem đường dẫn Codex và PowerShell thực tế.
+Không có tự động polling. **Refresh trên thẻ** kiểm tra dependency, junction và login của chính
+tài khoản đó. Tạo bằng cách sao chép cũng kiểm tra login local một lần nếu CLI có sẵn.
 CLI/Powershell không tìm thấy được báo trong status bar, không làm app crash.
 
 ## Dữ liệu và credential
@@ -26,22 +42,25 @@ CLI/Powershell không tìm thấy được báo trong status bar, không làm ap
 ```text
 CodexAccountManager/
   CodexAccountManager.exe
-  ...runtime files...
   accounts.json
   settings.json
   manager.lock
   logs/app.log
   profiles/<GUID>/
     config.toml
-    auth.json          # chỉ Codex CLI tạo sau login
+    auth.json          # CLI tạo sau login hoặc sao chép khi người dùng chọn
     ...private state...
     sessions -> <Default Codex Home>/sessions
 ```
 
 App dùng thư mục executable, không phụ thuộc current working directory. Không lưu password,
-không đọc/sao chép/hiển thị auth.json. `accounts.json` chỉ chứa metadata và trạng thái chuẩn hóa.
-Credential được CLI lưu dạng file theo `cli_auth_credentials_store="file"`; tham số này cũng
-được truyền vào từng lệnh để không chuyển credential sang keyring do config override.
+không hiển thị/giải mã auth.json. Chỉ sao chép file này khi người dùng chọn trong form thêm tài khoản;
+không sao chép database, lịch sử, token từ nguồn khác hoặc toàn bộ Codex Home.
+`accounts.json` chỉ chứa metadata và trạng thái chuẩn hóa.
+Credential được CLI lưu dạng file theo tham số `-c cli_auth_credentials_store="file"` truyền
+vào từng lệnh, kể cả khi TOML được copy có thiết lập keyring. Không sửa TOML gốc.
+Auth được sao chép là một snapshot độc lập về file, không phải tài khoản mới; hai bản vẫn dùng
+cùng tài khoản dịch vụ, và có thể cần đăng nhập lại khi credential bị thu hồi hoặc thay đổi.
 Environment credential/remote attachment đã biết được loại khỏi terminal con để tránh kế thừa
 identity của process chạy manager. Không sửa biến môi trường Windows hoặc auth/config mặc định.
 Các thay đổi thủ công về provider/config/environment trong terminal thuộc quyền kiểm soát người dùng.
@@ -85,7 +104,7 @@ với Not logged in; output thô không hiển thị. Không suy ra email/accoun
 
 ## Xóa account và gỡ app
 
-Đóng mọi terminal dùng profile. Chọn **Delete**, đọc tên và đường dẫn trong confirmation.
+Đóng mọi terminal dùng profile. Chọn **••• → Xóa tài khoản**, đọc tên và đường dẫn trong confirmation.
 Manager chặn terminal đang theo dõi còn chạy; sau restart cần người dùng đảm bảo đóng cả
 terminal cũ hoặc được mở thủ công. Manager không force-kill Codex.
 
@@ -150,14 +169,16 @@ pwsh -File ./scripts/build.ps1 -DotNet D:\VSYS\.dotnet-sdk\dotnet.exe
 pwsh -File ./scripts/build.ps1 -SkipPublish
 ```
 
-Script build Release, chạy integration tests, publish self-contained win-x64 vào
+Script build Release, chạy integration tests, publish single-file framework-dependent win-x64 vào
 `dist/CodexAccountManager`. Publish không xóa accounts/settings/profiles của bản có sẵn;
-đóng manager trước khi cập nhật binary. Không chạy build vào thư mục đang dùng bằng terminal.
+runtime cũ được loại bỏ theo dependency manifest của bản self-contained trước, không recursive delete.
+Đóng manager trước khi cập nhật binary; script giữ khóa manager trong lúc cập nhật.
 Không đóng gói credential/data vào ZIP hoặc commit Git.
 
 Test bao gồm junction thật, độc lập profile, sentinel sống sau Delete, missing/broken/wrong link,
 thư mục thật, nested junction, ancestor junction, traversal, atomic JSON và khóa manager,
-quoting Unicode/ký tự shell, process environment, official CLI status trên profile trống.
+quoting Unicode/ký tự shell, process environment, official CLI status trên profile trống,
+sao chép TOML nguyên vẹn, auth chỉ khi opt-in, source auth thiếu/đang ghi và bảo toàn file nguồn.
 
 Manual acceptance cần tài khoản thật: browser login, hai terminal đăng nhập riêng đồng thời,
 resume một session App, rồi đóng terminal và Delete profile thử. Build/tests không thay thế bước này.
