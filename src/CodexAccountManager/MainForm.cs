@@ -148,7 +148,13 @@ public sealed class MainForm : Form
         Item("Mở thư mục", () => OpenFolder(account));
         Item("Chi tiết", () =>
         {
-            MessageBox.Show(this, $"{account.DisplayName}\n\nID: {account.Id}\nCodex Home: {PathSafety.Profile(repository.Root, account)}\nSessions: {Path.Combine(settings.DefaultCodexHome, "sessions")}", "Chi tiết tài khoản");
+            using var dialog = new AccountDetailsForm(account, PathSafety.Profile(repository.Root, account), Path.Combine(settings.DefaultCodexHome, "sessions"));
+            if (dialog.ShowDialog(this) != DialogResult.OK) return Task.CompletedTask;
+            var oldName = account.DisplayName; var oldNote = account.Note;
+            account.DisplayName = dialog.AccountName; account.Note = dialog.AccountNote;
+            try { repository.SaveAccounts(accounts); }
+            catch { account.DisplayName = oldName; account.Note = oldNote; throw; }
+            status.Text = "Đã cập nhật tài khoản.";
             return Task.CompletedTask;
         });
         menu.Items.Add(new ToolStripSeparator()); Item("Xóa tài khoản", () => Delete(account));

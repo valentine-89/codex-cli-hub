@@ -265,6 +265,18 @@ Test("session projects use metadata cwd, deduplicate and mark missing directorie
     Assert(result.Projects[0].Exists && result.Projects[0].SessionCount == 2, "Existing project not first or incorrect session count");
     Assert(!result.Projects[1].Exists, "Missing directory not marked");
 });
+Test("session projects sort by name then path with missing directories last", () =>
+{
+    var f = Fixture();
+    var paths = new[] { Path.Combine(f.Root, "z", "Alpha"), Path.Combine(f.Root, "a", "beta"), Path.Combine(f.Root, "a", "Alpha"), Path.Combine(f.Root, "missing") };
+    for (var i = 0; i < paths.Length; i++)
+    {
+        if (i < 3) Directory.CreateDirectory(paths[i]);
+        File.WriteAllText(Path.Combine(f.Shared, i + ".jsonl"), System.Text.Json.JsonSerializer.Serialize(new { type = "session_meta", payload = new { cwd = paths[i] } }));
+    }
+    var result = new SessionProjectCatalog().Read(f.Shared);
+    Assert(result.Projects.Select(p => p.Directory).SequenceEqual(new[] { paths[2], paths[0], paths[1], paths[3] }), "Incorrect alphabetical ordering");
+});
 Test("session catalog skips nested links and supports large metadata headers", () =>
 {
     var f = Fixture(); var outside = Path.Combine(f.Root, "external"); Directory.CreateDirectory(outside);
@@ -346,6 +358,7 @@ Test("WinForms renders populated and empty account lists", () =>
                 }
             }
             CaptureDialog(new CodexAccountManager.AddAccountForm(), "ui-add-account.png");
+            CaptureDialog(new CodexAccountManager.AccountDetailsForm(a, f.Path(a), f.Shared), "ui-account-details.png");
             CaptureDialog(new CodexAccountManager.AdvancedSettingsForm(f.Settings, new(null, null, false)), "ui-settings.png");
             File.WriteAllText(Path.Combine(f.Shared, "project.jsonl"), System.Text.Json.JsonSerializer.Serialize(new { type = "session_meta", payload = new { cwd = f.App } }));
             CaptureDialog(new CodexAccountManager.ProjectPickerForm(f.Shared, "Work account"), "ui-project-picker.png");
@@ -372,6 +385,21 @@ tests.Add(("PowerShell argument quoting and process environment isolation", asyn
         Assert(Environment.GetEnvironmentVariable("CODEX_HOME") == original, "Parent environment changed");
     }
     finally { Environment.SetEnvironmentVariable("OPENAI_API_KEY", originalKey); }
+}));
+tests.Add(("login exits only on success in PowerShell 7 and 5.1", async () =>
+{
+    var f = Fixture(); var deps = await DependencyDetector.DetectAsync(); deps.Require();
+    var legacy = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe");
+    foreach (var shell in new[] { deps.PowerShell!, legacy }.Distinct(StringComparer.OrdinalIgnoreCase))
+    {
+        foreach (var code in new[] { 0, 1 })
+        {
+            var fake = Path.Combine(f.Root, "fake-login.ps1"); File.WriteAllText(fake, "exit " + code);
+            var script = CodexProcessLauncher.BuildScript(fake, f.App, f.App, CodexAction.Login) + "; [Console]::Out.WriteLine('terminal-kept'); exit 37";
+            var result = await ShellRunner.RunAsync(shell, script, f.App);
+            Assert(code == 0 ? result.ExitCode == 0 && !result.Output.Contains("terminal-kept") : result.ExitCode == 37 && result.Output.Contains("terminal-kept"), "Login exit behavior incorrect");
+        }
+    }
 }));
 tests.Add(("official CLI status against a fresh isolated profile", async () =>
 {

@@ -122,7 +122,8 @@ public sealed class CodexProcessLauncher
         return "$ErrorActionPreference = 'Stop'; $env:CODEX_HOME = " + ShellRunner.Quote(PathSafety.Canonical(home))
             + "; " + clear + "; " + ShellRunner.Utf8Setup
             + "Set-Location -LiteralPath " + ShellRunner.Quote(PathSafety.Canonical(workingDirectory))
-            + "; & " + ShellRunner.Quote(codex) + " -c 'cli_auth_credentials_store=\"file\"'" + args;
+            + "; $LASTEXITCODE = $null; & " + ShellRunner.Quote(codex) + " -c 'cli_auth_credentials_store=\"file\"'" + args
+            + (action == CodexAction.Login ? "; if ($? -and $LASTEXITCODE -eq 0) { exit 0 }" : "");
     }
 
     public void Launch(Dependencies dependencies, string id, string home, string workingDirectory, CodexAction action)

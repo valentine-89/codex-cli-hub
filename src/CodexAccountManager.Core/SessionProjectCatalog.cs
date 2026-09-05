@@ -4,7 +4,8 @@ namespace CodexAccountManager.Core;
 
 public sealed record SessionProject(string Directory, DateTime LastUsedUtc, int SessionCount, bool Exists)
 {
-    public override string ToString() => Directory + (Exists ? "" : "  — không còn tồn tại");
+    public string Name => Path.GetFileName(Path.TrimEndingDirectorySeparator(Directory)) is { Length: > 0 } name ? name : Directory;
+    public override string ToString() => Name + "  —  " + Directory + (Exists ? "" : "  — không còn tồn tại");
 }
 public sealed record ProjectCatalog(IReadOnlyList<SessionProject> Projects, int SkippedFiles);
 
@@ -46,7 +47,9 @@ public sealed class SessionProjectCatalog
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { skipped++; }
         }
-        return new(projects.Values.OrderByDescending(p => p.Exists).ThenByDescending(p => p.LastUsedUtc).ToArray(), skipped);
+        return new(projects.Values.OrderByDescending(p => p.Exists)
+            .ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(p => p.Directory, StringComparer.OrdinalIgnoreCase).ToArray(), skipped);
     }
 
     private static string? ReadWorkingDirectory(string file, byte[] buffer)
