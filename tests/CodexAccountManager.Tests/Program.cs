@@ -1,5 +1,28 @@
 using CodexAccountManager.Core;
 
+if (args.Length == 1 && args[0] == "--echo-stdin")
+{
+    Console.InputEncoding = new System.Text.UTF8Encoding(false); Console.OutputEncoding = new System.Text.UTF8Encoding(false);
+    Console.Write(Console.In.ReadToEnd()); return 0;
+}
+
+if (args.Length == 2 && args[0] == "--refresh-accounts")
+{
+    var repo = new AccountRepository(args[1]); using var appLock = repo.AcquireLock();
+    var doc = repo.LoadAccounts(); var settings = repo.LoadSettings(); var deps = await DependencyDetector.DetectAsync();
+    foreach (var account in doc.Accounts)
+    {
+        var home = new CodexProfileService(repo.Root, new JunctionService()).Validate(account, settings);
+        CredentialConfig.EnsureFile(home);
+        account.LoginStatus = await new CodexStatusService().CheckAsync(deps, home);
+        account.Quota = await new CodexQuotaService().ReadAsync(deps, home); account.QuotaError = null;
+        account.LastCheckedAt = DateTimeOffset.UtcNow;
+        Console.WriteLine(account.DisplayName + ": " + account.LoginStatus);
+        foreach (var line in account.Quota.Lines) Console.WriteLine(line.Display());
+    }
+    repo.SaveAccounts(doc); return 0;
+}
+
 if (args.Length == 2 && args[0] == "--catalog")
 {
     var result = new SessionProjectCatalog().Read(args[1]);
@@ -117,15 +140,67 @@ Test("status classification never exposes CLI output", () =>
     Assert(CodexStatusService.Classify(new(1, "Not logged in")) == "Not logged in", "Logged-out classification failed");
     Assert(CodexStatusService.Classify(new(1, "invalid config")) == "Check failed (exit 1)", "Config error called logged-out");
 });
-Test("new login copies original TOML exactly without copying auth", () =>
+Test("quota weekly-only does not invent a five-hour window", () =>
+{
+    using var json = System.Text.Json.JsonDocument.Parse("""
+    {"rateLimitsByLimitId":{"codex":{"limitId":"codex","primary":null,"secondary":{"usedPercent":21,"windowDurationMins":10080,"resetsAt":1900000000}}},
+     "rateLimits":{"limitId":"codex","primary":null,"secondary":{"usedPercent":21,"windowDurationMins":10080,"resetsAt":1900000000}}}
+    """);
+    var quota = CodexQuotaService.Parse(json.RootElement);
+    Assert(quota.Lines.Count == 1 && quota.Lines[0].Title.Contains("Tuần") && quota.Lines[0].RemainingPercent == 79, "Weekly quota missing/duplicated");
+    Assert(!quota.Lines.Any(l => l.Title.Contains("5 giờ")), "Invented short quota");
+});
+Test("quota includes all buckets, credits, spend limits and reset count", () =>
+{
+    using var json = System.Text.Json.JsonDocument.Parse("""
+    {"rateLimitsByLimitId":{
+      "codex":{"limitId":"codex","primary":{"usedPercent":10,"windowDurationMins":300,"resetsAt":1900000000},"secondary":{"usedPercent":35,"windowDurationMins":10080,"resetsAt":1901000000},"credits":{"unlimited":false,"hasCredits":true,"balance":"12.50"}},
+      "review":{"limitId":"review","limitName":"Review","primary":{"usedPercent":100,"windowDurationMins":1440,"resetsAt":null},"individualLimit":{"remainingPercent":40,"used":"6","limit":"10","resetsAt":1900000000}}
+    },"rateLimitResetCredits":{"availableCount":2}}
+    """);
+    var quota = CodexQuotaService.Parse(json.RootElement);
+    Assert(quota.Lines.Count == 7, "Quota fields were dropped");
+    Assert(quota.Lines.Any(l => l.Title.Contains("Review") && l.RemainingPercent == 0), "Other bucket missing");
+    Assert(quota.Lines.Any(l => l.Detail == "12.50") && quota.Lines.Any(l => l.Title == "Lượt reset" && l.Detail == "2"), "Credits missing");
+});
+Test("quota period is based on duration, missing metrics stay unavailable", () =>
+{
+    using var json = System.Text.Json.JsonDocument.Parse("""
+    {"rateLimits":{"limitId":"codex","primary":{"usedPercent":null,"windowDurationMins":10080,"resetsAt":null},"secondary":null}}
+    """);
+    var quota = CodexQuotaService.Parse(json.RootElement);
+    Assert(quota.Lines.Count == 1 && quota.Lines[0].Title.Contains("Tuần") && quota.Lines[0].RemainingPercent is null, "Null usage treated as zero or wrong period");
+});
+tests.Add(("Windows PowerShell fallback preserves Unicode native stdin and stdout", async () =>
+{
+    var legacy = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe");
+    var deps = await DependencyDetector.DetectAsync([legacy]);
+    Assert(deps.PowerShellMajor == 5 && deps.PowerShell == legacy, $"Legacy shell not selected: major={deps.PowerShellMajor}, path={deps.PowerShell}");
+    var f = Fixture();
+    var script = "'Tiếng Việt 日本語 ☀' | & " + ShellRunner.Quote(Environment.ProcessPath!) + " --echo-stdin";
+    var result = await ShellRunner.RunAsync(legacy, script, f.App);
+    Assert(result.ExitCode == 0 && result.Output.Contains("Tiếng Việt 日本語 ☀"), "Native UTF-8 pipeline corrupted");
+    var preferred = await DependencyDetector.DetectAsync();
+    Assert(preferred.PowerShellMajor >= 7, "Installed PowerShell 7 not preferred");
+}));
+Test("new login copies settings while enforcing file credentials without copying auth", () =>
 {
     var f = Fixture(); var original = Path.Combine(f.Settings.DefaultCodexHome, "config.toml");
     var toml = "# Unicode thử nghiệm\r\nmodel = \"example-model\"\r\ncli_auth_credentials_store = \"keyring\"\r\n[mcp_servers.test]\r\ncommand = \"test\"\r\n";
     File.WriteAllText(original, toml); File.WriteAllText(Path.Combine(f.Settings.DefaultCodexHome, "auth.json"), "test-only");
     var a = f.Service.Create("New login", "", f.Settings, false);
-    Assert(File.ReadAllText(Path.Combine(f.Path(a), "config.toml")) == toml, "TOML changed during copying");
+    Assert(File.ReadAllText(Path.Combine(f.Path(a), "config.toml")) == toml.Replace("\"keyring\"", "\"file\""), "Unrelated TOML changed or file credentials not enforced");
     Assert(!File.Exists(Path.Combine(f.Path(a), "auth.json")), "New login copied credentials without opt-in");
     Assert(File.ReadAllText(original) == toml, "Original config changed");
+});
+Test("credential config ignores keys in multiline prompts and preserves comments", () =>
+{
+    var input = "prompt = \"\"\"\ncli_auth_credentials_store = 'keyring'\n\"\"\"\n'cli_auth_credentials_store' = 'auto' # keep\n[mcp_servers.x]\ncommand = 'unchanged'\n";
+    var result = CredentialConfig.UseFile(input);
+    Assert(result.Contains("cli_auth_credentials_store = 'keyring'\n\"\"\"") && result.Contains("'cli_auth_credentials_store' = \"file\" # keep"), "Edited prompt or lost comment");
+    Assert(result.Contains("command = 'unchanged'"), "Unrelated settings changed");
+    var table = "[mcp_servers.x]\ncommand = 'tool'\n";
+    Assert(CredentialConfig.UseFile(table).StartsWith("cli_auth_credentials_store = \"file\"\n["), "Inserted root key inside table");
 });
 Test("explicit account copy creates independent auth and preserves original on delete", () =>
 {
@@ -149,6 +224,32 @@ Test("source auth cannot be written while copied", () =>
     using var writer = new FileStream(source, FileMode.Open, FileAccess.Write, FileShare.None);
     Reject(() => f.Service.Create("Copy", "", f.Settings, true));
     Assert(!Directory.Exists(Path.Combine(f.App, "profiles")), "Created partial profile during source write");
+});
+Test("Apply replaces only default auth and preserves both session trees and configs", () =>
+{
+    var f = Fixture(); var a = f.Create("Apply");
+    var source = Path.Combine(f.Path(a), "auth.json"); var target = Path.Combine(f.Settings.DefaultCodexHome, "auth.json");
+    File.WriteAllText(source, "{\"testOnly\":\"selected\"}"); File.WriteAllText(target, "{\"testOnly\":\"original\"}");
+    var config = Path.Combine(f.Settings.DefaultCodexHome, "config.toml"); File.WriteAllText(config, "model = 'unchanged'");
+    f.Service.ApplyAuthentication(a, f.Settings);
+    Assert(File.ReadAllText(target) == File.ReadAllText(source), "Apply did not replace auth");
+    Assert(File.ReadAllText(config) == "model = 'unchanged'" && File.ReadAllText(f.Sentinel) == "shared-do-not-delete", "Apply touched config/sessions");
+    Assert(!Directory.EnumerateFiles(f.Settings.DefaultCodexHome, "*.tmp").Any(), "Apply temporary file leaked");
+});
+Test("Apply rejects invalid source auth without altering the default login", () =>
+{
+    var f = Fixture(); var a = f.Create("Apply"); var target = Path.Combine(f.Settings.DefaultCodexHome, "auth.json");
+    File.WriteAllText(target, "{\"testOnly\":\"keep\"}"); File.WriteAllText(Path.Combine(f.Path(a), "auth.json"), "not JSON");
+    Reject(() => f.Service.ApplyAuthentication(a, f.Settings));
+    Assert(File.ReadAllText(target).Contains("keep") && !Directory.EnumerateFiles(f.Settings.DefaultCodexHome, "*.tmp").Any(), "Failed Apply damaged default auth");
+});
+Test("Apply leaves locked default auth untouched", () =>
+{
+    var f = Fixture(); var a = f.Create("Apply"); var target = Path.Combine(f.Settings.DefaultCodexHome, "auth.json");
+    File.WriteAllText(target, "{\"testOnly\":\"keep\"}"); File.WriteAllText(Path.Combine(f.Path(a), "auth.json"), "{\"testOnly\":\"new\"}");
+    using (var locked = new FileStream(target, FileMode.Open, FileAccess.Read, FileShare.None))
+        Reject(() => f.Service.ApplyAuthentication(a, f.Settings));
+    Assert(File.ReadAllText(target).Contains("keep"), "Locked auth altered");
 });
 Test("session projects use metadata cwd, deduplicate and mark missing directories", () =>
 {
@@ -195,6 +296,8 @@ Test("WinForms renders populated and empty account lists", () =>
 {
     var f = Fixture(); var a = f.Create("Work account — thử nghiệm"); var b = f.Create("Personal account");
     a.LoginStatus = "Logged in (local credentials)"; a.LastCheckedAt = DateTimeOffset.Now;
+    a.Quota = new QuotaSnapshot { Lines = [new("codex · Tuần", 72, 1900000000)] };
+    b.Quota = new QuotaSnapshot { Lines = [new("codex · 5 giờ", 95, 1900000000), new("codex · Tuần", 81, 1901000000), new("Review · Tuần", 44, 1901000000)] };
     a.Note = "UI fixture — no real credentials";
     var repo = new AccountRepository(f.App); repo.SaveSettings(f.Settings);
     repo.SaveAccounts(new AccountDocument { Accounts = [a, b] });

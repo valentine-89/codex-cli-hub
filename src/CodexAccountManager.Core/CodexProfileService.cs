@@ -39,6 +39,7 @@ public sealed class CodexProfileService(string root, JunctionService junctions)
             config.CopyTo(destination); destination.Flush(true);
         }
         else File.WriteAllText(Path.Combine(profile, "config.toml"), "cli_auth_credentials_store = \"file\"\n");
+        CredentialConfig.EnsureFile(profile);
         if (auth is not null)
         {
             using var destination = new FileStream(Path.Combine(profile, "auth.json"), FileMode.CreateNew, FileAccess.Write, FileShare.None);
@@ -56,6 +57,38 @@ public sealed class CodexProfileService(string root, JunctionService junctions)
         foreach (var name in new[] { "auth.json", "config.toml" })
             PathSafety.NoReparseAncestors(Path.Combine(path, name));
         return path;
+    }
+
+    public void ApplyAuthentication(Account account, AppSettings settings)
+    {
+        var profile = Validate(account, settings);
+        var home = PathSafety.Canonical(settings.DefaultCodexHome);
+        PathSafety.OrdinaryDirectory(home);
+        var source = Path.Combine(profile, "auth.json");
+        var target = Path.Combine(home, "auth.json");
+        PathSafety.NoReparseAncestors(source); PathSafety.NoReparseAncestors(target);
+        if (!File.Exists(source)) throw new IOException("Tài khoản chưa có auth.json. Hãy đăng nhập trước khi Apply.");
+        using var sourcePin = JunctionService.PinDirectory(profile);
+        using var targetPin = JunctionService.PinDirectory(home, allowWrites: true);
+        var temporary = Path.Combine(home, ".codex-account-manager-" + Guid.NewGuid().ToString("N") + ".tmp");
+        try
+        {
+            using (var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read))
+            using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            { input.CopyTo(output); output.Flush(true); }
+            try
+            {
+                using var check = File.OpenRead(temporary);
+                using var json = System.Text.Json.JsonDocument.Parse(check);
+                if (json.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object)
+                    throw new IOException("Auth của tài khoản không hợp lệ; chưa thay đổi phiên chính.");
+            }
+            catch (System.Text.Json.JsonException) { throw new IOException("Auth của tài khoản không hợp lệ; chưa thay đổi phiên chính."); }
+            PathSafety.NoReparseAncestors(target);
+            if (File.Exists(target)) File.Replace(temporary, target, null);
+            else File.Move(temporary, target);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
 
     public void Delete(Account account, AppSettings settings)

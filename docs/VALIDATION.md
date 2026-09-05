@@ -1,32 +1,29 @@
-# Validation — v1.1, 2026-09-05
+# Validation — v1.2, 2026-09-05
 
-- Windows x64; .NET SDK 8.0.424; Codex CLI 0.153.4; PowerShell 7.
-- Release build: passed, zero warnings/errors. Integration harness: **24/24 passed**.
-- Published single executable: **264,339 bytes** (~258 KiB), framework-dependent .NET 8 Windows Desktop.
-- Old .NET native/managed/satellite runtime files removed from portable output. Data files retained.
-- Published executable startup on installed .NET 8: exit 0.
-- Logo embedded in executable/title bar/header. Cards, Add Account, Advanced Settings and Project Picker rendered and visually inspected.
-- Project catalog against original sessions: **19 unique project directories**, 35 skipped entries;
-  newest examples included codex-cli-hub, SightCount AI, codex-quota-guard-mcp, PVoil-LED and UlabGuard.
-  No original session content modified. Only metadata cwd is parsed; unsupported/unreadable entries are counted.
-- Tests verify original TOML copied exactly, auth copying requires explicit opt-in, auth copies are independent,
-  source auth survives profile deletion, and missing/locked source auth aborts before profile creation.
-- Existing NTFS safety tests pass: correct tag/target, shared sentinel preservation, wrong/missing/broken links,
-  normal/nested/ancestor directories, path traversal and directory pinning.
-- Session project tests cover deduplication, existence, unrelated record filtering, large metadata and cancellation.
-- Official status on empty isolated profile, quoting/environment isolation, metadata locks and malformed JSON pass.
-- No actual source auth copied during testing. Auth/config copy tests used test-owned fake files only.
+- Windows x64, SDK 8.0.424, Codex CLI 0.153.4.
+- Release build: zero warnings/errors; **32/32 tests passed**.
+- Framework-dependent single executable: **294,547 bytes**. Published executable startup: exit 0.
+- PowerShell 7 remains preferred. An actual Windows PowerShell 5.1 subprocess passed UTF-8 native stdin/stdout testing with Vietnamese/Japanese/Unicode text.
+- Official app-server `account/rateLimits/read` was verified against the user's managed Codex1 profile:
+  weekly remaining 49%, reset 2026-09-12 15:38 Asia/Bangkok; no 5-hour window returned; credits 0; reset count 0.
+  Snapshot saved in portable accounts.json. No reset consumed and no thread/model turn created.
+- The actual managed profile config was verified to contain `cli_auth_credentials_store = "file"`.
+- Quota tests cover weekly-only, multiple buckets, credits, spend limits, reset counts and missing metrics.
+- Apply tests use synthetic credentials only: successful replacement, invalid JSON rejection and locked-target preservation.
+  Default config and shared session sentinel remain unchanged. No real default login was replaced during implementation.
+- Existing junction, path traversal, metadata, config-copy, credential isolation and project catalog tests pass.
+- Cards with weekly-only/multiple quotas and Apply buttons rendered and visually inspected.
+- Repository cleanup removed **2,758,967 bytes** from explicit bin/obj/artifacts targets without junction traversal.
+  Portable executable, real account/profile, config, auth, shared sessions and Git/source retained.
 
-## Limits
-Real browser login and simultaneous authenticated account use remain user acceptance steps.
-The missing-runtime simulation command was rejected by automatic approval review with `blocked by policy`.
-The app uses the standard .NET GUI apphost prerequisite/download behavior and provides an explicit download
-link in Advanced Settings; that missing-runtime branch was not executed here. No .NET installation was changed.
+## Remaining acceptance
+Real interactive Apply requires the user to close Codex App/main-account terminals, confirm Apply,
+then reopen Codex. It was intentionally not performed on the actual default account during tests.
 No Git remote configured; push awaits repository URL. Portable deployment is local.
 
-## Published executable SHA-256
+## Executable SHA-256
 ```text
-AD46F79988DC2EFAA730F3A0574A9A14318EEC7AEC318A1E45A9C819E235ED0B
+61F80BDF9A5B43A93BA6ACF013C6412C030D649EC89D537C2FBDBB80FF50326D
 ```
 
-Runtime installation documentation: https://learn.microsoft.com/en-us/dotnet/core/runtime-discovery/troubleshoot-app-launch
+Protocol source: https://learn.chatgpt.com/docs/app-server

@@ -9,6 +9,7 @@ public sealed class MainForm : Form
     private readonly CodexProfileService profiles;
     private readonly CodexProcessLauncher launcher = new();
     private readonly CodexStatusService statusService = new();
+    private readonly CodexQuotaService quotaService = new();
     private readonly Logger logger;
     private readonly AccountDocument accounts;
     private AppSettings settings;
@@ -47,7 +48,18 @@ public sealed class MainForm : Form
         layout.Controls.Add(header, 0, 0); layout.Controls.Add(cards, 0, 1); layout.Controls.Add(status, 0, 2);
         Controls.Add(layout);
         cards.Resize += (_, _) => ResizeCards(); RenderAccounts();
-        Shown += async (_, _) => { try { await Run(RefreshDependencies); } finally { ready.TrySetResult(); } };
+        Shown += async (_, _) =>
+        {
+            try
+            {
+                await Run(async () =>
+                {
+                    await RefreshDependencies();
+                    foreach (var account in accounts.Accounts) CredentialConfig.EnsureFile(profiles.Validate(account, settings));
+                });
+            }
+            finally { ready.TrySetResult(); }
+        };
         FormClosing += (_, e) => { if (busy) { e.Cancel = true; status.Text = "Chờ thao tác hiện tại hoàn tất."; } };
         FormClosed += (_, _) => { tips.Dispose(); logo.Image?.Dispose(); };
     }
@@ -93,9 +105,11 @@ public sealed class MainForm : Form
     }
     private Control CreateCard(Account account)
     {
-        var card = new AccountCard { Height = 208 };
-        var body = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6, Margin = Padding.Empty };
-        foreach (var height in new[] { 30, 28, 27, 25, 29, 38 }) body.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+        var quotaLines = account.Quota?.Lines ?? [];
+        var quotaRows = Math.Max(1, quotaLines.Count) + (account.QuotaError is not null ? 1 : 0);
+        var card = new AccountCard { Height = 208 + quotaRows * 25 };
+        var body = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 7, Margin = Padding.Empty };
+        foreach (var height in new[] { 30, 28, 27, quotaRows * 25, 25, 29, 38 }) body.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
         var heading = Theme.Label(account.DisplayName, true); heading.Font = new Font("Segoe UI", 12, FontStyle.Bold);
         body.Controls.Add(heading, 0, 0); tips.SetToolTip(heading, account.DisplayName);
         var state = account.LoginStatus switch
@@ -108,12 +122,26 @@ public sealed class MainForm : Form
         string shared;
         try { profiles.Validate(account, settings); shared = "Sessions dùng chung ✓"; }
         catch (Exception ex) { shared = "Sessions cần kiểm tra"; tips.SetToolTip(card, ex.Message); }
-        body.Controls.Add(Theme.Label(shared + "    ·    Quota: Not available"), 0, 2);
-        var note = Theme.Label(string.IsNullOrEmpty(account.Note) ? "—" : account.Note); tips.SetToolTip(note, account.Note); body.Controls.Add(note, 0, 3);
-        body.Controls.Add(Theme.Label("Cập nhật: " + (account.LastCheckedAt?.ToLocalTime().ToString("dd/MM HH:mm") ?? "—") + "    ·    " + account.Id[..8]), 0, 4);
+        body.Controls.Add(Theme.Label(shared), 0, 2);
+        var quotaPanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = quotaRows, Margin = Padding.Empty };
+        var row = 0;
+        void AddQuota(string text, Color color)
+        {
+            quotaPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 25));
+            var label = Theme.Label(text); label.ForeColor = color; tips.SetToolTip(label, text);
+            quotaPanel.Controls.Add(label, 0, row++);
+        }
+        if (account.QuotaError is not null)
+            AddQuota(account.Quota is null ? "Quota: cập nhật thất bại" : "Quota cũ · " + account.Quota.FetchedAt.ToLocalTime().ToString("dd/MM HH:mm"), Color.DarkOrange);
+        if (quotaLines.Count == 0) AddQuota(account.Quota is null ? "Quota: chưa kiểm tra" : "Quota: không có hạn mức được trả về", Theme.Muted);
+        foreach (var line in quotaLines) AddQuota(line.Display(), line.RemainingPercent is <= 10 ? Color.Firebrick : Theme.Accent);
+        body.Controls.Add(quotaPanel, 0, 3);
+        var note = Theme.Label(string.IsNullOrEmpty(account.Note) ? "—" : account.Note); tips.SetToolTip(note, account.Note); body.Controls.Add(note, 0, 4);
+        body.Controls.Add(Theme.Label("Cập nhật: " + (account.LastCheckedAt?.ToLocalTime().ToString("dd/MM HH:mm") ?? "—") + "    ·    " + account.Id[..8]), 0, 5);
         var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = Padding.Empty };
         actions.Controls.Add(ActionButton("Open", () => Launch(account, CodexAction.Open), true, 102));
         actions.Controls.Add(ActionButton("Refresh", () => Check(account), false, 102));
+        actions.Controls.Add(ActionButton("Apply", () => Apply(account), false, 70));
         var more = Theme.Button("•••", width: 42); var menu = new ContextMenuStrip();
         void Item(string text, Func<Task> action) { var item = menu.Items.Add(text); item.Click += async (_, _) => await Run(action); }
         Item("Đăng nhập lại", () => Launch(account, CodexAction.Login)); Item("Resume", () => Launch(account, CodexAction.Resume));
@@ -125,12 +153,12 @@ public sealed class MainForm : Form
         });
         menu.Items.Add(new ToolStripSeparator()); Item("Xóa tài khoản", () => Delete(account));
         more.Click += (_, _) => menu.Show(more, new Point(0, more.Height)); more.Disposed += (_, _) => menu.Dispose();
-        actions.Controls.Add(more); body.Controls.Add(actions, 0, 5); card.Controls.Add(body); return card;
+        actions.Controls.Add(more); body.Controls.Add(actions, 0, 6); card.Controls.Add(body); return card;
     }
     private async Task RefreshDependencies()
     {
         dependencies = await DependencyDetector.DetectAsync();
-        status.Text = $"Codex {(dependencies.Codex is null ? "chưa cài" : "sẵn sàng")}   ·   PowerShell {(dependencies.PowerShell is null ? "chưa cài" : "sẵn sàng")}";
+        status.Text = $"Codex {(dependencies.Codex is null ? "chưa cài" : "sẵn sàng")}   ·   PowerShell {(dependencies.PowerShell is null ? "chưa cài" : dependencies.PowerShellMajor + (dependencies.PowerShellMajor < 7 ? " · UTF-8" : ""))}";
     }
     private async Task AddAccount()
     {
@@ -150,6 +178,7 @@ public sealed class MainForm : Form
     private Task Launch(Account account, CodexAction action)
     {
         var path = profiles.Validate(account, settings);
+        CredentialConfig.EnsureFile(path);
         var workingDirectory = settings.WorkingDirectory;
         if (action == CodexAction.Open)
         {
@@ -162,9 +191,15 @@ public sealed class MainForm : Form
     }
     private async Task Check(Account account)
     {
-        await RefreshDependencies(); var path = profiles.Validate(account, settings); status.Text = "Đang cập nhật " + account.DisplayName + "…";
+        await RefreshDependencies(); var path = profiles.Validate(account, settings); CredentialConfig.EnsureFile(path); status.Text = "Đang cập nhật " + account.DisplayName + "…";
         account.LoginStatus = await statusService.CheckAsync(dependencies, path); account.LastCheckedAt = DateTimeOffset.UtcNow;
+        try { account.Quota = await quotaService.ReadAsync(dependencies, path); account.QuotaError = null; }
+        catch (Exception ex) when (ex is IOException or TimeoutException or System.Text.Json.JsonException)
+        {
+            account.QuotaError = ex is TimeoutException ? "Quá thời gian đọc quota" : "Không đọc được quota; kiểm tra đăng nhập/kết nối";
+        }
         repository.SaveAccounts(accounts); logger.Write("check", path); status.Text = "Đã cập nhật " + account.DisplayName;
+        if (account.QuotaError is not null) status.Text = account.QuotaError;
     }
     private Task Delete(Account account)
     {
@@ -180,6 +215,16 @@ public sealed class MainForm : Form
     {
         var path = PathSafety.Profile(repository.Root, account); PathSafety.OrdinaryDirectory(path);
         Process.Start(new ProcessStartInfo("explorer.exe") { UseShellExecute = true, ArgumentList = { path } }); return Task.CompletedTask;
+    }
+    private Task Apply(Account account)
+    {
+        if (launcher.IsRunning(account.Id)) throw new IOException("Đóng terminal của tài khoản này trước khi Apply để tránh cập nhật auth đồng thời.");
+        if (MessageBox.Show(this, $"Áp dụng đăng nhập của {account.DisplayName} vào Codex chính?\n\nHãy tắt Codex App và các terminal đang dùng phiên chính trước khi tiếp tục. Sau Apply, mở lại Codex App.\n\nĐích: {settings.DefaultCodexHome}\nChỉ thay auth.json; config và sessions được giữ nguyên.",
+            "Apply đăng nhập", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return Task.CompletedTask;
+        profiles.ApplyAuthentication(account, settings);
+        logger.Write("apply-auth", settings.DefaultCodexHome);
+        status.Text = "Đã Apply " + account.DisplayName + ". Mở lại Codex App để dùng phiên này.";
+        return Task.CompletedTask;
     }
     private async Task SettingsDialog()
     {

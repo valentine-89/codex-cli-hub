@@ -10,6 +10,8 @@ public sealed class Account
     public DateTimeOffset? LastCheckedAt { get; set; }
     public string LoginStatus { get; set; } = "Not checked";
     public string Note { get; set; } = "";
+    public QuotaSnapshot? Quota { get; set; }
+    public string? QuotaError { get; set; }
 }
 
 public sealed class AccountDocument
@@ -26,8 +28,22 @@ public sealed class AppSettings
     public string WorkingDirectory { get; set; } = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 }
 
-public interface IQuotaProvider { string GetDisplay(Account account); }
-public sealed class UnavailableQuotaProvider : IQuotaProvider
+public sealed class QuotaSnapshot
 {
-    public string GetDisplay(Account account) => "Not available";
+    public DateTimeOffset FetchedAt { get; set; } = DateTimeOffset.UtcNow;
+    public List<QuotaLine> Lines { get; set; } = [];
+}
+public sealed record QuotaLine(string Title, double? RemainingPercent, long? ResetsAt, string? Detail = null)
+{
+    public string Display()
+    {
+        var value = RemainingPercent is double remaining ? $"còn {remaining:0.#}%" : Detail ?? "Không có dữ liệu";
+        string reset = "";
+        if (ResetsAt is long seconds)
+        {
+            try { reset = " · reset " + DateTimeOffset.FromUnixTimeSeconds(seconds).ToLocalTime().ToString("dd/MM HH:mm"); }
+            catch (ArgumentOutOfRangeException) { reset = " · reset không xác định"; }
+        }
+        return $"{Title}: {value}{reset}";
+    }
 }

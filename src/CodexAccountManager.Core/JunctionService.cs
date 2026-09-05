@@ -27,9 +27,9 @@ public sealed class JunctionService
     }
 
     // Deny rename/removal while a directory is being inspected or traversed.
-    public static SafeFileHandle PinDirectory(string path)
+    public static SafeFileHandle PinDirectory(string path, bool allowWrites = false)
     {
-        var handle = Open(path, access: 0x80000000, share: 1);
+        var handle = Open(path, access: 0x80000000, share: allowWrites ? 3u : 1u);
         try { PathSafety.OrdinaryDirectory(path); return handle; }
         catch { handle.Dispose(); throw; }
     }

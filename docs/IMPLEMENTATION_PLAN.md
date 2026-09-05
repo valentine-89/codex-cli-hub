@@ -1,5 +1,11 @@
 # Implementation plan — 2026-09-05
 
+v1.2 revision: user-authorized PowerShell 5.1 UTF-8 fallback; official transient stdio app-server
+`account/rateLimits/read` with all returned quota windows/buckets; Apply auth with confirmation to
+close Codex App and atomic file replacement; targeted no-junction cleanup of build artifacts.
+Managed config.toml explicitly sets cli_auth_credentials_store="file" on creation/startup/launch/check;
+only the root setting is edited, preserving other settings and multiline prompt contents.
+
 Historical v1.0 plan. The user-requested v1.1 revision supersedes self-contained packaging,
 single-form/grid UI and the prohibition on explicitly requested auth copying. Current behavior:
 framework-dependent single executable with native missing-runtime download prompt; branded cards;
