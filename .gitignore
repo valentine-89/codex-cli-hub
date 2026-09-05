@@ -1,0 +1,12 @@
+**/bin/
+**/obj/
+dist/
+artifacts/
+**/profiles/
+**/logs/
+**/accounts.json
+**/settings.json
+**/auth.json
+*.tmp
+*.lock
+.vs/
