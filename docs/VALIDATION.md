@@ -7,9 +7,9 @@
 - Login success exits the shell; failure keeps it open. Exit behavior verified with synthetic CLI scripts on PowerShell 7 and 5.1; real browser login remains manual acceptance.
 - Project catalog sorts existing directories by repo name A–Z then full path, with missing directories last. Ordering tested with duplicate repo names.
 - PowerShell 7 remains preferred. An actual Windows PowerShell 5.1 subprocess passed UTF-8 native stdin/stdout testing with Vietnamese/Japanese/Unicode text.
-- Earlier v1.2 verification of official app-server `account/rateLimits/read` against the user's managed Codex1 profile:
-  weekly remaining 49%, reset 2026-09-12 15:38 Asia/Bangkok; no 5-hour window returned; credits 0; reset count 0.
-  Snapshot saved in portable accounts.json. No reset consumed and no thread/model turn created.
+- Earlier v1.2 verification of official app-server `account/rateLimits/read` against a managed weekly-only profile:
+  weekly window, credits and reset count returned without an invented 5-hour window.
+  Snapshot saved locally. No reset consumed and no thread/model turn created.
 - The actual managed profile config was verified to contain `cli_auth_credentials_store = "file"`.
 - Quota tests cover weekly-only, multiple buckets, credits, spend limits, reset counts and missing metrics.
 - Apply tests use synthetic credentials only: successful replacement, invalid JSON rejection and locked-target preservation.
@@ -22,11 +22,12 @@
 ## Remaining acceptance
 Real interactive Apply requires the user to close Codex App/main-account terminals, confirm Apply,
 then reopen Codex. It was intentionally not performed on the actual default account during tests.
-No Git remote configured; push awaits repository URL. Portable deployment is local.
+Public source and release: https://github.com/valentine-89/codex-cli-hub
+Release ZIP contains only the executable; local profiles and account metadata are excluded.
 
 ## Executable SHA-256
 ```text
-53D0157520EB9EBAA4B2E28EA858B532731FFD885504B82839A978A849B541C4
+BBBA93F43D1810C2676D55267C62860FAF22E51BAEEB9D4F25C8D0EF2546E9D0
 ```
 
 Protocol source: https://learn.chatgpt.com/docs/app-server

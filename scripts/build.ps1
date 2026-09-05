@@ -72,7 +72,9 @@ try {
         Remove-Item -LiteralPath $stagePath
         Copy-Item -LiteralPath (Join-Path $projectRoot 'README.md') -Destination $publishPath
         New-Item -ItemType Directory -Path (Join-Path $publishPath 'docs') -Force | Out-Null
-        Copy-Item -LiteralPath (Join-Path $projectRoot 'docs/IMPLEMENTATION_PLAN.md') -Destination (Join-Path $publishPath 'docs')
+        foreach ($name in @('ARCHITECTURE.md','VALIDATION.md')) {
+            Copy-Item -LiteralPath (Join-Path $projectRoot "docs/$name") -Destination (Join-Path $publishPath 'docs')
+        }
         Get-FileHash -LiteralPath $exe -Algorithm SHA256
         Write-Host "Portable folder: $publishPath"
     }

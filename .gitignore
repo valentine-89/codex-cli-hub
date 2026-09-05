@@ -10,3 +10,9 @@ artifacts/
 *.tmp
 *.lock
 .vs/
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+*.p12

@@ -3,9 +3,16 @@
 Ứng dụng Windows desktop portable quản lý nhiều profile Codex CLI. C#/.NET 8,
 WinForms, giao diện thẻ với cửa sổ thêm tài khoản/cài đặt riêng; không installer/service.
 
+[Tải bản mới nhất](https://github.com/valentine-89/codex-cli-hub/releases/latest) ·
+[Changelog](CHANGELOG.md) · [Đóng góp](CONTRIBUTING.md) · [Bảo mật](SECURITY.md) · [MIT](LICENSE)
+
+Dự án độc lập, không phải sản phẩm chính thức của OpenAI.
+
 ## Chạy bản portable
 
-Mở `dist/CodexAccountManager/CodexAccountManager.exe`. Copy **cả thư mục** để chuyển vị trí.
+Tải ZIP ở trang Releases, giải nén vào thư mục riêng có quyền ghi và chạy `CodexAccountManager.exe`.
+ZIP chỉ chứa EXE; app tự tạo dữ liệu khi sử dụng. Sau khi đã thêm tài khoản, copy **cả thư mục**
+để chuyển vị trí. Bản build local nằm tại `dist/CodexAccountManager/CodexAccountManager.exe`.
 Bản **Windows x64 nhẹ, single-file, framework-dependent** không nhúng .NET runtime.
 Máy cần **.NET 8 Desktop Runtime x64**, Codex CLI chính thức và PowerShell.
 Ưu tiên PowerShell 7; nếu không có, app dùng Windows PowerShell 5.1. Mọi terminal/check đều
@@ -201,6 +208,14 @@ Chỉ xóa các thư mục bin/obj và artifacts được chỉ định; từ ch
 accounts, profiles, Git và source. Không dọn cache SDK/NuGet chung ngoài repo.
 Không đóng gói credential/data vào ZIP hoặc commit Git.
 
+Tạo gói phát hành chỉ chứa EXE (đã nhúng thông báo giấy phép MIT):
+
+```powershell
+pwsh -File ./scripts/package.ps1
+```
+
+ZIP được ghi vào `dist/releases`; script kiểm tra chỉ có một EXE và đối chiếu SHA-256 với bản build.
+
 Test bao gồm junction thật, độc lập profile, sentinel sống sau Delete, missing/broken/wrong link,
 thư mục thật, nested junction, ancestor junction, traversal, atomic JSON và khóa manager,
 quoting Unicode/ký tự shell, process environment, official CLI status trên profile trống,
@@ -212,7 +227,8 @@ resume một session App, rồi đóng terminal và Delete profile thử. Build/
 
 ## Nguồn thiết kế
 
-- [Kế hoạch triển khai](docs/IMPLEMENTATION_PLAN.md)
+- [Kiến trúc hiện tại](docs/ARCHITECTURE.md)
+- [Kết quả kiểm thử](docs/VALIDATION.md)
 - [Codex configuration](https://learn.chatgpt.com/docs/config-file/config-advanced)
 - [Codex authentication](https://learn.chatgpt.com/docs/auth)
 - [CLI reference](https://learn.chatgpt.com/docs/developer-commands?surface=cli)

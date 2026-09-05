@@ -11,5 +11,6 @@
   <ItemGroup>
     <EmbeddedResource Include="../../assets/logo.png" LogicalName="CodexAccountManager.logo.png" />
     <EmbeddedResource Include="../../assets/app.ico" LogicalName="CodexAccountManager.app.ico" />
+    <EmbeddedResource Include="../../LICENSE" LogicalName="CodexAccountManager.LICENSE" />
   </ItemGroup>
 </Project>
