@@ -6,7 +6,7 @@ public static class QuotaPresentation
         && quota.Lines.Any(l => l.Duration == 10080) && !quota.Lines.Any(l => l.Duration == 300);
     public static bool Low(QuotaSnapshot? quota) => quota?.Lines.Any(l => l.Duration is 300 or 10080 && l.RemainingPercent is <= 10) == true;
     public static long? DueReset(Account account, DateTimeOffset now) => account.Quota?.Lines
-        .Where(l => l.Duration is > 0 && l.ResetsAt is > 0 && l.ResetsAt <= now.ToUnixTimeSeconds()
+        .Where(l => l.Duration is > 0 && l.ResetsAt is > 0 && l.ResetsAt <= now.ToUnixTimeSeconds() - 60
             && l.ResetsAt > account.LastAutoRefreshReset && l.ResetsAt > account.Quota.FetchedAt.ToUnixTimeSeconds())
         .Select(l => l.ResetsAt).Max();
 }

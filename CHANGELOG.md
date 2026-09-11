@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.1 — 2026-09-12
+
+- Wait 60 seconds after the quota reset timestamp before the one-time automatic Refresh to allow for server delay.
+
 ## 1.5.0 — 2026-09-12
 
 - Golden cards for weekly-only accounts; gray cards at 10% or less in either five-hour or weekly quota, with pale gold for weekly-only accounts.

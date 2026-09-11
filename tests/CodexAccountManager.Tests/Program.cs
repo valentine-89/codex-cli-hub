@@ -436,15 +436,15 @@ Test("reset refresh is due once across reloads and allows the next reset", () =>
 {
     var f = Fixture(); var account = f.Create("Schedule");
     account.Quota = new QuotaSnapshot { FetchedAt = DateTimeOffset.FromUnixTimeSeconds(100), Lines = [new("codex · 5 hours", 0, 200), new("codex · Weekly", 20, 300)] };
-    Assert(QuotaPresentation.DueReset(account, DateTimeOffset.FromUnixTimeSeconds(199)) is null, "Early refresh");
-    Assert(QuotaPresentation.DueReset(account, DateTimeOffset.FromUnixTimeSeconds(200)) == 200, "Reset not due");
+    Assert(QuotaPresentation.DueReset(account, DateTimeOffset.FromUnixTimeSeconds(259)) is null, "Early refresh");
+    Assert(QuotaPresentation.DueReset(account, DateTimeOffset.FromUnixTimeSeconds(260)) == 200, "Reset not due");
     account.LastAutoRefreshReset = 200;
     var repo = new AccountRepository(f.App); repo.SaveAccounts(new AccountDocument { Accounts = [account] });
     account = repo.LoadAccounts().Accounts.Single();
-    Assert(QuotaPresentation.DueReset(account, DateTimeOffset.FromUnixTimeSeconds(250)) is null, "Repeated reset attempt after restart/failure");
-    Assert(QuotaPresentation.DueReset(account, DateTimeOffset.FromUnixTimeSeconds(300)) == 300, "Next reset not due");
+    Assert(QuotaPresentation.DueReset(account, DateTimeOffset.FromUnixTimeSeconds(299)) is null, "Repeated reset attempt after restart/failure");
+    Assert(QuotaPresentation.DueReset(account, DateTimeOffset.FromUnixTimeSeconds(360)) == 300, "Next reset not due");
     account.Quota!.FetchedAt = DateTimeOffset.FromUnixTimeSeconds(301);
-    Assert(QuotaPresentation.DueReset(account, DateTimeOffset.FromUnixTimeSeconds(302)) is null, "Already refreshed snapshot retriggered");
+    Assert(QuotaPresentation.DueReset(account, DateTimeOffset.FromUnixTimeSeconds(362)) is null, "Already refreshed snapshot retriggered");
 });
 Test("quota parser preserves plan and duration metadata", () =>
 {

@@ -1,4 +1,4 @@
-# Validation — v1.5, 2026-09-12
+# Validation — v1.5.1, 2026-09-12
 
 - Windows x64, SDK 8.0.424, Codex CLI 0.153.4.
 - Release build: zero warnings/errors; **38/38 tests passed**.
@@ -21,7 +21,7 @@
 
 - English cards and all four dialogs rendered and visually inspected. Cached Vietnamese quota labels render in English without altering account names, notes or stored quota values.
 
-- Equal-height golden/gray cards with inline plan labels rendered and inspected. Reset scheduling tested before/at reset, after persisted retry suppression, and at the next reset. No real reset was consumed.
+- Equal-height golden/gray cards with inline plan labels rendered and inspected. Reset scheduling tested at reset +59/+60 seconds, after persisted retry suppression, and at the next reset. No real reset was consumed.
 
 ## Remaining acceptance
 Real interactive Apply requires the user to close Codex App/main-account terminals, confirm Apply,
@@ -31,7 +31,7 @@ Release ZIP contains only the executable; local profiles and account metadata ar
 
 ## Executable SHA-256
 ```text
-83B988986CA274DAA0DEA011B94C081DC2C661E170053A6F2D8465AA96DE6067
+7020541D21CCDA8A77934530E6C87D414CE25AC4FEA1FBE4A3E6A1E26CD6937A
 ```
 
 Protocol source: https://learn.chatgpt.com/docs/app-server
