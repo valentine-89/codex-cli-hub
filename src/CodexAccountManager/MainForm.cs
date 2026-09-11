@@ -20,6 +20,7 @@ public sealed class MainForm : Form
     private readonly Panel header = new() { Dock = DockStyle.Fill };
     private readonly ToolTip tips = new();
     private bool busy;
+    private readonly System.Windows.Forms.Timer resetTimer = new() { Interval = 1000 };
     private readonly TaskCompletionSource ready = new();
     public Task Ready => ready.Task;
 
@@ -58,10 +59,11 @@ public sealed class MainForm : Form
                     foreach (var account in accounts.Accounts) CredentialConfig.EnsureFile(profiles.Validate(account, settings));
                 });
             }
-            finally { ready.TrySetResult(); }
+            finally { ready.TrySetResult(); resetTimer.Start(); }
         };
+        resetTimer.Tick += async (_, _) => await RefreshDueAccounts();
         FormClosing += (_, e) => { if (busy) { e.Cancel = true; status.Text = "Please wait for the current operation."; } };
-        FormClosed += (_, _) => { tips.Dispose(); logo.Image?.Dispose(); };
+        FormClosed += (_, _) => { resetTimer.Stop(); resetTimer.Dispose(); tips.Dispose(); logo.Image?.Dispose(); };
     }
 
     private Button ActionButton(string text, Func<Task> action, bool primary = false, int width = 100)
@@ -100,14 +102,17 @@ public sealed class MainForm : Form
             var label = Theme.Label("Add your first account", true); label.TextAlign = ContentAlignment.MiddleCenter;
             empty.Controls.Add(label); cards.Controls.Add(empty);
         }
-        foreach (var account in accounts.Accounts) cards.Controls.Add(CreateCard(account));
+        var rows = accounts.Accounts.Select(a => Math.Max(1, a.Quota?.Lines.Count ?? 0) + (a.QuotaError is not null ? 1 : 0)).DefaultIfEmpty(1).Max();
+        foreach (var account in accounts.Accounts) cards.Controls.Add(CreateCard(account, rows));
         ResizeCards(); cards.ResumeLayout(); cards.AutoScrollPosition = new Point(-scroll.X, -scroll.Y);
     }
-    private Control CreateCard(Account account)
+    private Control CreateCard(Account account, int quotaRows)
     {
         var quotaLines = account.Quota?.Lines ?? [];
-        var quotaRows = Math.Max(1, quotaLines.Count) + (account.QuotaError is not null ? 1 : 0);
-        var card = new AccountCard { Height = 208 + quotaRows * 25 };
+        var golden = QuotaPresentation.WeeklyOnly(account.Quota); var low = QuotaPresentation.Low(account.Quota);
+        var card = new AccountCard { Height = 208 + quotaRows * 25,
+            BackColor = golden ? (low ? Color.FromArgb(250, 244, 221) : Color.FromArgb(245, 218, 140))
+                : low ? Color.FromArgb(225, 228, 231) : Color.White };
         var body = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 7, Margin = Padding.Empty };
         foreach (var height in new[] { 30, 28, 27, quotaRows * 25, 25, 29, 38 }) body.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
         var heading = Theme.Label(account.DisplayName, true); heading.Font = new Font("Segoe UI", 12, FontStyle.Bold);
@@ -117,7 +122,8 @@ public sealed class MainForm : Form
             "Logged in (local credentials)" => "●  Logged in", "Not logged in" => "○  Not logged in",
             "Not checked" => "○  Not checked", _ => account.LoginStatus
         };
-        var login = Theme.Label(state); login.ForeColor = account.LoginStatus.StartsWith("Logged in", StringComparison.Ordinal) ? Theme.Accent : Theme.Muted;
+        if (!string.IsNullOrWhiteSpace(account.Quota?.PlanType)) state += " · " + account.Quota.PlanType;
+        var login = Theme.Label(state); tips.SetToolTip(login, state); login.ForeColor = account.LoginStatus.StartsWith("Logged in", StringComparison.Ordinal) ? Theme.Accent : Theme.Muted;
         body.Controls.Add(login, 0, 1);
         string shared;
         try { profiles.Validate(account, settings); shared = "Shared sessions ✓"; }
@@ -139,12 +145,12 @@ public sealed class MainForm : Form
         var note = Theme.Label(string.IsNullOrEmpty(account.Note) ? "—" : account.Note); tips.SetToolTip(note, account.Note); body.Controls.Add(note, 0, 4);
         body.Controls.Add(Theme.Label("Updated: " + (account.LastCheckedAt?.ToLocalTime().ToString("dd/MM HH:mm") ?? "—") + "    ·    " + account.Id[..8]), 0, 5);
         var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = Padding.Empty };
-        actions.Controls.Add(ActionButton("Open", () => Launch(account, CodexAction.Open), true, 102));
+        actions.Controls.Add(ActionButton("Open CLI", () => Launch(account, CodexAction.Open), true, 102));
         actions.Controls.Add(ActionButton("Refresh", () => Check(account), false, 102));
         actions.Controls.Add(ActionButton("Apply", () => Apply(account), false, 70));
         var more = Theme.Button("•••", width: 42); var menu = new ContextMenuStrip();
         void Item(string text, Func<Task> action) { var item = menu.Items.Add(text); item.Click += async (_, _) => await Run(action); }
-        Item("Log in again", () => Launch(account, CodexAction.Login)); Item("Resume", () => Launch(account, CodexAction.Resume));
+        Item("Log in again", () => Launch(account, CodexAction.Login)); Item("Resume in CLI", () => Launch(account, CodexAction.Resume));
         Item("Open folder", () => OpenFolder(account));
         Item("Details", () =>
         {
@@ -206,6 +212,25 @@ public sealed class MainForm : Form
         }
         repository.SaveAccounts(accounts); logger.Write("check", path); status.Text = "Updated " + account.DisplayName;
         if (account.QuotaError is not null) status.Text = account.QuotaError;
+    }
+    private async Task RefreshDueAccounts()
+    {
+        if (busy || IsDisposed) return;
+        foreach (var account in accounts.Accounts.ToArray())
+        {
+            var due = QuotaPresentation.DueReset(account, DateTimeOffset.UtcNow);
+            if (due is null) continue;
+            await Run(async () =>
+            {
+                var previous = account.LastAutoRefreshReset;
+                account.LastAutoRefreshReset = due.Value;
+                try { repository.SaveAccounts(accounts); }
+                catch { account.LastAutoRefreshReset = previous; resetTimer.Stop(); throw; }
+                // Persist the attempt before networking so failures/restarts cannot repeat it.
+                try { await Check(account); }
+                catch (Exception) { status.Text = "Automatic refresh failed. Use Refresh to retry."; }
+            });
+        }
     }
     private Task Delete(Account account)
     {

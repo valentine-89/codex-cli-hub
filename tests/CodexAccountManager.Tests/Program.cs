@@ -308,8 +308,8 @@ Test("WinForms renders populated and empty account lists", () =>
 {
     var f = Fixture(); var a = f.Create("Work account — thử nghiệm"); var b = f.Create("Personal account");
     a.LoginStatus = "Logged in (local credentials)"; a.LastCheckedAt = DateTimeOffset.Now;
-    a.Quota = new QuotaSnapshot { Lines = [new("codex · Weekly", 72, 1900000000)] };
-    b.Quota = new QuotaSnapshot { Lines = [new("codex · 5 hours", 95, 1900000000), new("codex · Weekly", 81, 1901000000), new("Review · Weekly", 44, 1901000000)] };
+    a.Quota = new QuotaSnapshot { PlanType = "Plus", Lines = [new("codex · Weekly", 72, 1900000000)] };
+    b.Quota = new QuotaSnapshot { PlanType = "Pro", Lines = [new("codex · 5 hours", 5, 1900000000), new("codex · Weekly", 81, 1901000000), new("Review · Weekly", 44, 1901000000)] };
     a.Note = "UI fixture — no real credentials";
     var repo = new AccountRepository(f.App); repo.SaveSettings(f.Settings);
     repo.SaveAccounts(new AccountDocument { Accounts = [a, b] });
@@ -330,6 +330,9 @@ Test("WinForms renders populated and empty account lists", () =>
                 window.PerformLayout(); Application.DoEvents();
             }
             Prepare(form);
+            var flow = form.Controls.OfType<TableLayoutPanel>().Single().Controls.OfType<FlowLayoutPanel>().Single();
+            Assert(flow.Controls.Count == 2 && flow.Controls[0].Height == flow.Controls[1].Height, "Card heights differ");
+            Assert(flow.Controls[0].BackColor == System.Drawing.Color.FromArgb(245, 218, 140) && flow.Controls[1].BackColor == System.Drawing.Color.FromArgb(225, 228, 231), "Card colors incorrect");
             var output = System.IO.Path.Combine(Environment.CurrentDirectory, "artifacts");
             Directory.CreateDirectory(output);
             using (var bitmap = new System.Drawing.Bitmap(form.Width, form.Height))
@@ -418,6 +421,36 @@ Test("cached quota labels render in English without mutating stored values", () 
     Assert(line.Display() == "Tên bucket · Weekly: 72% left" && line.Title == "Tên bucket · Tuần", "Cached quota or server bucket changed");
     Assert(new QuotaLine("codex · 5 giờ", null, null, "Không có dữ liệu").Display() == "codex · 5 hours: No data", "Cached duration not translated");
     Assert(new QuotaLine("Lượt reset", null, null, "2").Display() == "Reset count: 2", "Cached reset label not translated");
+});
+Test("quota card styles reflect only weekly and five-hour windows", () =>
+{
+    var quota = new QuotaSnapshot { Lines = [new("codex · Weekly", 10, null)] };
+    Assert(QuotaPresentation.WeeklyOnly(quota) && QuotaPresentation.Low(quota), "Weekly low quota not classified");
+    quota.Lines.Add(new("codex · 5 hours", 80, null));
+    Assert(!QuotaPresentation.WeeklyOnly(quota) && QuotaPresentation.Low(quota), "Weekly exhaustion ignored");
+    quota.Lines = [new("Credits", 0, null), new("codex · Weekly", null, null)];
+    Assert(!QuotaPresentation.Low(quota), "Unknown usage or credits treated as exhausted");
+    Assert(!QuotaPresentation.WeeklyOnly(null), "Missing data treated as weekly-only");
+});
+Test("reset refresh is due once across reloads and allows the next reset", () =>
+{
+    var f = Fixture(); var account = f.Create("Schedule");
+    account.Quota = new QuotaSnapshot { FetchedAt = DateTimeOffset.FromUnixTimeSeconds(100), Lines = [new("codex · 5 hours", 0, 200), new("codex · Weekly", 20, 300)] };
+    Assert(QuotaPresentation.DueReset(account, DateTimeOffset.FromUnixTimeSeconds(199)) is null, "Early refresh");
+    Assert(QuotaPresentation.DueReset(account, DateTimeOffset.FromUnixTimeSeconds(200)) == 200, "Reset not due");
+    account.LastAutoRefreshReset = 200;
+    var repo = new AccountRepository(f.App); repo.SaveAccounts(new AccountDocument { Accounts = [account] });
+    account = repo.LoadAccounts().Accounts.Single();
+    Assert(QuotaPresentation.DueReset(account, DateTimeOffset.FromUnixTimeSeconds(250)) is null, "Repeated reset attempt after restart/failure");
+    Assert(QuotaPresentation.DueReset(account, DateTimeOffset.FromUnixTimeSeconds(300)) == 300, "Next reset not due");
+    account.Quota!.FetchedAt = DateTimeOffset.FromUnixTimeSeconds(301);
+    Assert(QuotaPresentation.DueReset(account, DateTimeOffset.FromUnixTimeSeconds(302)) is null, "Already refreshed snapshot retriggered");
+});
+Test("quota parser preserves plan and duration metadata", () =>
+{
+    using var json = System.Text.Json.JsonDocument.Parse("""{"rateLimits":{"planType":"plus","primary":{"usedPercent":20,"windowDurationMins":300}}}""");
+    var quota = CodexQuotaService.Parse(json.RootElement);
+    Assert(quota.PlanType == "plus" && quota.Lines.Single().WindowDurationMins == 300, "Plan or duration missing");
 });
 var failures = 0;
 try

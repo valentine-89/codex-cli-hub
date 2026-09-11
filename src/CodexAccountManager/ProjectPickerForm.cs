@@ -7,7 +7,7 @@ public sealed class ProjectPickerForm : Form
     private readonly TextBox search = new() { Dock = DockStyle.Fill, PlaceholderText = "Search project folders…" };
     private readonly ListBox projects = new() { Dock = DockStyle.Fill, IntegralHeight = false, BorderStyle = BorderStyle.FixedSingle, HorizontalScrollbar = true };
     private readonly Label status = Theme.Label("Loading projects…");
-    private readonly Button open = Theme.Button("Open", true);
+    private readonly Button open = Theme.Button("Open CLI", true);
     private readonly CancellationTokenSource cancellation = new();
     private readonly string sessionsDirectory;
     private bool resourcesDisposed;

@@ -76,7 +76,7 @@ public sealed class CodexQuotaService
 
     public static QuotaSnapshot Parse(JsonElement result)
     {
-        var snapshot = new QuotaSnapshot(); var seen = new HashSet<string>(StringComparer.Ordinal);
+        var snapshot = new QuotaSnapshot { PlanType = Text(result, "planType") }; var seen = new HashSet<string>(StringComparer.Ordinal);
         if (result.TryGetProperty("rateLimitsByLimitId", out var buckets) && buckets.ValueKind == JsonValueKind.Object)
             foreach (var bucket in buckets.EnumerateObject()) AddBucket(bucket.Value, bucket.Name);
         if (result.TryGetProperty("rateLimits", out var single) && single.ValueKind == JsonValueKind.Object)
@@ -91,6 +91,7 @@ public sealed class CodexQuotaService
             if (bucket.ValueKind != JsonValueKind.Object) return;
             var id = Text(bucket, "limitId") ?? key;
             if (!seen.Add(id)) return;
+            snapshot.PlanType ??= Text(bucket, "planType");
             var label = Text(bucket, "limitName") ?? id;
             foreach (var field in bucket.EnumerateObject())
             {
@@ -104,7 +105,7 @@ public sealed class CodexQuotaService
                     10080 => "Weekly", 300 => "5 hours", > 0 when duration % 1440 == 0 => $"{duration / 1440} days",
                     > 0 when duration % 60 == 0 => $"{duration / 60} hours", > 0 => $"{duration} minutes", _ => field.Name
                 };
-                snapshot.Lines.Add(new(label + " · " + period, remaining, Integer(window, "resetsAt")));
+                snapshot.Lines.Add(new(label + " · " + period, remaining, Integer(window, "resetsAt"), WindowDurationMins: duration));
             }
             if (bucket.TryGetProperty("credits", out var credits) && credits.ValueKind == JsonValueKind.Object)
             {

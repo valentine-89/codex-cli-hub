@@ -12,6 +12,7 @@ public sealed class Account
     public string Note { get; set; } = "";
     public QuotaSnapshot? Quota { get; set; }
     public string? QuotaError { get; set; }
+    public long LastAutoRefreshReset { get; set; }
 }
 
 public sealed class AccountDocument
@@ -30,11 +31,13 @@ public sealed class AppSettings
 
 public sealed class QuotaSnapshot
 {
+    public string? PlanType { get; set; }
     public DateTimeOffset FetchedAt { get; set; } = DateTimeOffset.UtcNow;
     public List<QuotaLine> Lines { get; set; } = [];
 }
-public sealed record QuotaLine(string Title, double? RemainingPercent, long? ResetsAt, string? Detail = null)
+public sealed record QuotaLine(string Title, double? RemainingPercent, long? ResetsAt, string? Detail = null, long? WindowDurationMins = null)
 {
+    public long? Duration => WindowDurationMins ?? (Title.EndsWith(" · Weekly", StringComparison.Ordinal) || Title.EndsWith(" · Tuần", StringComparison.Ordinal) ? 10080 : Title.EndsWith(" · 5 hours", StringComparison.Ordinal) || Title.EndsWith(" · 5 giờ", StringComparison.Ordinal) ? 300 : null);
     public string Display()
     {
         var value = RemainingPercent is double remaining ? $"{remaining:0.#}% left" : EnglishLabel(Detail ?? "No data");

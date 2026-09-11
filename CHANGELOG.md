@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5.0 — 2026-09-12
+
+- Golden cards for weekly-only accounts; gray cards at 10% or less in either five-hour or weekly quota, with pale gold for weekly-only accounts.
+- Equal card heights and plan type on the existing login-status line when returned by Codex.
+- Rename Open to Open CLI and Resume to Resume in CLI.
+- Automatically refresh once per known reset timestamp while the app is open; persist attempts across restarts and retain manual retry on failure.
+
 ## 1.4.0 — 2026-09-06
 
 - Switch all app labels, menus, dialogs, errors and quota text to English.

@@ -5,6 +5,13 @@ WinForms, giao diện thẻ với cửa sổ thêm tài khoản/cài đặt riê
 
 Từ v1.4.0, giao diện app sử dụng **English**. Tên/note tài khoản do người dùng nhập giữ nguyên.
 
+V1.5: thẻ chỉ có quota tuần mang nền vàng; quota 5h hoặc tuần còn ≤10% chuyển xám
+(thẻ vàng chuyển vàng nhạt). Các thẻ có cùng chiều cao; loại gói hiện cạnh trạng thái đăng nhập
+nếu Codex trả về. **Open CLI** và **Resume in CLI** mở phiên CLI.
+Khi app đang mở, mỗi mốc reset quota đã biết kích hoạt Refresh một lần; lần thử được lưu
+để không lặp sau lỗi/khởi động lại. Khi mở lại app sau giờ reset, mốc chưa thử sẽ được xử lý.
+Refresh thất bại có thể thử lại bằng nút **Refresh**. App không tự mở khi đang tắt.
+
 [Tải bản mới nhất](https://github.com/valentine-89/codex-cli-hub/releases/latest) ·
 [Changelog](CHANGELOG.md) · [Đóng góp](CONTRIBUTING.md) · [Bảo mật](SECURITY.md) · [MIT](LICENSE)
 
