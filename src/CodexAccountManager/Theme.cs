@@ -32,7 +32,7 @@ internal static class Theme
 }
 internal sealed class AccountCard : Panel
 {
-    public AccountCard() { DoubleBuffered = true; BackColor = Color.White; Padding = new Padding(16, 12, 16, 10); Margin = new Padding(0, 0, 14, 14); }
+    public AccountCard() { DoubleBuffered = true; BackColor = Color.White; Padding = new Padding(14, 8, 14, 8); Margin = new Padding(0, 0, 14, 10); }
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);

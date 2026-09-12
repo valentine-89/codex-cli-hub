@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.0 — 2026-09-12
+
+- Compact account cards: name and ID share a row; login/plan and shared sessions share a row; note and update time share a row.
+- Reduce row spacing and padding while preserving full quota rows, equal card heights, tooltips and all actions.
+
 ## 1.6.0 — 2026-09-12
 
 - Run automatic quota refresh in the background without locking the whole interface, one account at a time, with a two-second delay after startup and between completed attempts.

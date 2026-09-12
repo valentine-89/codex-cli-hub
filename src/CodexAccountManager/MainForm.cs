@@ -111,14 +111,24 @@ public sealed class MainForm : Form
     {
         var quotaLines = account.Quota?.Lines ?? [];
         var golden = QuotaPresentation.WeeklyOnly(account.Quota); var low = QuotaPresentation.Low(account.Quota);
-        var card = new AccountCard { Height = 208 + quotaRows * 25,
+        var card = new AccountCard { Height = 140 + quotaRows * 22,
             BackColor = golden ? (low ? Color.FromArgb(250, 244, 221) : Color.FromArgb(245, 218, 140))
                 : low ? Color.FromArgb(225, 228, 231) : Color.White };
         card.Enabled = refreshQueue.ActiveAccountId != account.Id;
-        var body = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 7, Margin = Padding.Empty };
-        foreach (var height in new[] { 30, 28, 27, quotaRows * 25, 25, 29, 38 }) body.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+        var body = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Margin = Padding.Empty };
+        foreach (var height in new[] { 26, 23, quotaRows * 22, 25, 37 }) body.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+        TableLayoutPanel Columns(Control left, Control right, int rightWidth)
+        {
+            var columns = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty, Padding = Padding.Empty };
+            columns.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            columns.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, rightWidth));
+            columns.Controls.Add(left, 0, 0); columns.Controls.Add(right, 1, 0);
+            if (right is Label label) label.TextAlign = ContentAlignment.MiddleRight;
+            return columns;
+        }
         var heading = Theme.Label(account.DisplayName, true); heading.Font = new Font("Segoe UI", 12, FontStyle.Bold);
-        body.Controls.Add(heading, 0, 0); tips.SetToolTip(heading, account.DisplayName);
+        var id = Theme.Label(account.Id[..8]); tips.SetToolTip(id, account.Id);
+        body.Controls.Add(Columns(heading, id, 76), 0, 0); tips.SetToolTip(heading, account.DisplayName);
         var state = account.LoginStatus switch
         {
             "Logged in (local credentials)" => "●  Logged in", "Not logged in" => "○  Not logged in",
@@ -126,16 +136,16 @@ public sealed class MainForm : Form
         };
         if (!string.IsNullOrWhiteSpace(account.Quota?.PlanType)) state += " · " + account.Quota.PlanType;
         var login = Theme.Label(state); tips.SetToolTip(login, state); login.ForeColor = account.LoginStatus.StartsWith("Logged in", StringComparison.Ordinal) ? Theme.Accent : Theme.Muted;
-        body.Controls.Add(login, 0, 1);
         string shared;
         try { profiles.Validate(account, settings); shared = "Shared sessions ✓"; }
         catch (Exception ex) { shared = "Check shared sessions"; tips.SetToolTip(card, ex.Message); }
-        body.Controls.Add(Theme.Label(shared), 0, 2);
+        var sharedLabel = Theme.Label(shared); tips.SetToolTip(sharedLabel, shared);
+        body.Controls.Add(Columns(login, sharedLabel, 140), 0, 1);
         var quotaPanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = quotaRows, Margin = Padding.Empty };
         var row = 0;
         void AddQuota(string text, Color color)
         {
-            quotaPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 25));
+            quotaPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
             var label = Theme.Label(text); label.ForeColor = color; tips.SetToolTip(label, text);
             quotaPanel.Controls.Add(label, 0, row++);
         }
@@ -143,9 +153,11 @@ public sealed class MainForm : Form
             AddQuota(account.Quota is null ? "Quota: refresh failed" : "Cached quota · " + account.Quota.FetchedAt.ToLocalTime().ToString("dd/MM HH:mm"), Color.DarkOrange);
         if (quotaLines.Count == 0) AddQuota(account.Quota is null ? "Quota: not checked" : "Quota: no limits returned", Theme.Muted);
         foreach (var line in quotaLines) AddQuota(line.Display(), line.RemainingPercent is <= 10 ? Color.Firebrick : Theme.Accent);
-        body.Controls.Add(quotaPanel, 0, 3);
-        var note = Theme.Label(string.IsNullOrEmpty(account.Note) ? "—" : account.Note); tips.SetToolTip(note, account.Note); body.Controls.Add(note, 0, 4);
-        body.Controls.Add(Theme.Label("Updated: " + (account.LastCheckedAt?.ToLocalTime().ToString("dd/MM HH:mm") ?? "—") + "    ·    " + account.Id[..8]), 0, 5);
+        body.Controls.Add(quotaPanel, 0, 2);
+        var note = Theme.Label(string.IsNullOrEmpty(account.Note) ? "—" : account.Note); tips.SetToolTip(note, account.Note);
+        var updatedText = "Updated: " + (account.LastCheckedAt?.ToLocalTime().ToString("dd/MM HH:mm") ?? "—");
+        var updated = Theme.Label(updatedText); tips.SetToolTip(updated, updatedText);
+        body.Controls.Add(Columns(note, updated, 166), 0, 3);
         var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = Padding.Empty };
         actions.Controls.Add(ActionButton("Open CLI", () => Launch(account, CodexAction.Open), true, 102));
         actions.Controls.Add(ActionButton("Refresh", () => Check(account), false, 102));
@@ -168,7 +180,7 @@ public sealed class MainForm : Form
         });
         menu.Items.Add(new ToolStripSeparator()); Item("Delete account", () => Delete(account));
         more.Click += (_, _) => menu.Show(more, new Point(0, more.Height)); more.Disposed += (_, _) => menu.Dispose();
-        actions.Controls.Add(more); body.Controls.Add(actions, 0, 6); card.Controls.Add(body); return card;
+        actions.Controls.Add(more); body.Controls.Add(actions, 0, 4); card.Controls.Add(body); return card;
     }
     private async Task RefreshDependencies()
     {
