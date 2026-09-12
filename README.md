@@ -5,6 +5,12 @@ WinForms, giao diện thẻ với cửa sổ thêm tài khoản/cài đặt riê
 
 Từ v1.4.0, giao diện app sử dụng **English**. Tên/note tài khoản do người dùng nhập giữ nguyên.
 
+**Warm up** gửi `reply "OK"` bằng CLI của tài khoản đang chọn, chạy nền và không lưu session
+(`--ephemeral`). Lệnh dùng cấu hình mặc định của CLI, bỏ TOML/rules người dùng và chạy trong
+thư mục tạm trống với sandbox read-only. Cần CLI hỗ trợ `--ignore-user-config` (đã kiểm tra 0.154.0).
+Lời gọi tiêu thụ một ít quota; thời điểm bắt đầu/reset cửa sổ vẫn do máy chủ quyết định.
+Không tự lặp, không dùng lượt reset; timeout 90 giây. Sau khi thành công, dùng Refresh để xem quota mới.
+
 V1.7: thẻ gọn hơn với thông tin ngắn chia cột cùng hàng; giữ đủ quota và thao tác,
 ghi chú dài có tooltip và vẫn chỉnh sửa trong Details. Các thẻ giữ chiều cao bằng nhau.
 

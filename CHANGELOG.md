@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.8.0 — 2026-09-12
+
+- Add a per-card Warm up button: send `reply "OK"` with `codex exec --ephemeral` in the background without saving session files.
+- Use an empty temporary working directory, ignore user config/rules, and request read-only execution. No automatic retries; cancel on close and time out after 90 seconds.
+
 ## 1.7.0 — 2026-09-12
 
 - Compact account cards: name and ID share a row; login/plan and shared sessions share a row; note and update time share a row.

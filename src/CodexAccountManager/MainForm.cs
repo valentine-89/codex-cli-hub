@@ -20,6 +20,7 @@ public sealed class MainForm : Form
     private readonly Panel header = new() { Dock = DockStyle.Fill };
     private readonly ToolTip tips = new();
     private bool busy;
+    private readonly HashSet<string> warming = [];
     private readonly RefreshQueueGate refreshQueue = new();
     private readonly CancellationTokenSource lifetime = new();
     private readonly System.Windows.Forms.Timer resetTimer = new() { Interval = 1000 };
@@ -114,7 +115,7 @@ public sealed class MainForm : Form
         var card = new AccountCard { Height = 140 + quotaRows * 22,
             BackColor = golden ? (low ? Color.FromArgb(250, 244, 221) : Color.FromArgb(245, 218, 140))
                 : low ? Color.FromArgb(225, 228, 231) : Color.White };
-        card.Enabled = refreshQueue.ActiveAccountId != account.Id;
+        card.Enabled = refreshQueue.ActiveAccountId != account.Id && !warming.Contains(account.Id);
         var body = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Margin = Padding.Empty };
         foreach (var height in new[] { 26, 23, quotaRows * 22, 25, 37 }) body.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
         TableLayoutPanel Columns(Control left, Control right, int rightWidth)
@@ -159,10 +160,13 @@ public sealed class MainForm : Form
         var updated = Theme.Label(updatedText); tips.SetToolTip(updated, updatedText);
         body.Controls.Add(Columns(note, updated, 166), 0, 3);
         var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = Padding.Empty };
-        actions.Controls.Add(ActionButton("Open CLI", () => Launch(account, CodexAction.Open), true, 102));
-        actions.Controls.Add(ActionButton("Refresh", () => Check(account), false, 102));
-        actions.Controls.Add(ActionButton("Apply", () => Apply(account), false, 70));
-        var more = Theme.Button("•••", width: 42); var menu = new ContextMenuStrip();
+        actions.Controls.Add(ActionButton("Open CLI", () => Launch(account, CodexAction.Open), true, 82));
+        actions.Controls.Add(ActionButton("Refresh", () => Check(account), false, 72));
+        var warm = Theme.Button(warming.Contains(account.Id) ? "Warming…" : "Warm up", width: 82);
+        tips.SetToolTip(warm, "Send reply \"OK\" without saving a session. Uses a small amount of quota.");
+        warm.Click += async (_, _) => await WarmUp(account); actions.Controls.Add(warm);
+        actions.Controls.Add(ActionButton("Apply", () => Apply(account), false, 58));
+        var more = Theme.Button("•••", width: 32); var menu = new ContextMenuStrip();
         void Item(string text, Func<Task> action) { var item = menu.Items.Add(text); item.Click += async (_, _) => await Run(action); }
         Item("Log in again", () => Launch(account, CodexAction.Login)); Item("Resume in CLI", () => Launch(account, CodexAction.Resume));
         Item("Open folder", () => OpenFolder(account));
@@ -233,7 +237,7 @@ public sealed class MainForm : Form
     private async Task RefreshDueAccounts()
     {
         if (busy || IsDisposed || lifetime.IsCancellationRequested || refreshQueue.ActiveAccountId is not null) return;
-        var account = accounts.Accounts.FirstOrDefault(a => QuotaPresentation.DueReset(a, DateTimeOffset.UtcNow) is not null);
+        var account = accounts.Accounts.FirstOrDefault(a => !warming.Contains(a.Id) && QuotaPresentation.DueReset(a, DateTimeOffset.UtcNow) is not null);
         if (account is null || !refreshQueue.TryStart(account.Id, DateTimeOffset.UtcNow)) return;
         var due = QuotaPresentation.DueReset(account, DateTimeOffset.UtcNow)!.Value;
         try
@@ -291,6 +295,23 @@ public sealed class MainForm : Form
         catch (Exception) { message += " Refresh failed; use Refresh to update quota."; }
         status.Text = message;
         MessageBox.Show(this, message, "Reset credit", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+    private async Task WarmUp(Account account)
+    {
+        if (busy || refreshQueue.ActiveAccountId == account.Id || !warming.Add(account.Id)) return;
+        RenderAccounts();
+        try
+        {
+            var path = profiles.Validate(account, settings); var deps = dependencies; var token = lifetime.Token;
+            await Task.Run(() => new WarmUpService().RunAsync(deps, path, token), token);
+            if (!token.IsCancellationRequested && !busy) status.Text = "Warm up completed: " + account.DisplayName + " · OK";
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            if (!lifetime.IsCancellationRequested) MessageBox.Show(this, ex.Message, "Warm up", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        finally { warming.Remove(account.Id); if (!lifetime.IsCancellationRequested && !busy) RenderAccounts(); }
     }
     private Task Delete(Account account)
     {

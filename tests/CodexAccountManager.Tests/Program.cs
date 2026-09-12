@@ -1,5 +1,13 @@
 using CodexAccountManager.Core;
 
+if (args.Contains("exec"))
+{
+    if (!args.Contains("--ephemeral") || !args.Contains("--ignore-user-config") || !args.Contains("reply \"OK\"")
+        || !args.Contains("read-only") || string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CODEX_HOME"))) return 42;
+    Console.WriteLine("{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"OK\"}}");
+    return 0;
+}
+
 // Synthetic app-server for protocol tests; never reads credentials or contacts a server.
 if (args.Contains("app-server"))
 {
@@ -499,6 +507,16 @@ tests.Add(("reset protocol uses isolated profile and stable attempt key", async 
     }
     using var unknown = System.Text.Json.JsonDocument.Parse("{\"outcome\":\"unknown\"}");
     Reject(() => CodexQuotaService.ParseResetOutcome(unknown.RootElement));
+}));
+tests.Add(("warm up uses ephemeral isolated CLI without a saved session", async () =>
+{
+    var f = Fixture(); var account = f.Create("Warm up fixture");
+    var info = WarmUpService.StartInfo(Environment.ProcessPath!, f.Path(account), f.App);
+    Assert(info.ArgumentList.Last() == "reply \"OK\"" && info.ArgumentList.Contains("--ephemeral"), "Wrong warm-up command");
+    Assert(!info.Environment.ContainsKey("OPENAI_API_KEY") && info.Environment["CODEX_HOME"] == f.Path(account), "Wrong account environment");
+    var before = Directory.GetFiles(f.Shared).Order().ToArray();
+    await new WarmUpService().RunAsync(new(null, null, false, Environment.ProcessPath!), f.Path(account), CancellationToken.None);
+    Assert(before.SequenceEqual(Directory.GetFiles(f.Shared).Order()), "Warm up changed sessions");
 }));
 var failures = 0;
 try
