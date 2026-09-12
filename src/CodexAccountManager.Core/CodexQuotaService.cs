@@ -7,6 +7,22 @@ namespace CodexAccountManager.Core;
 public sealed class CodexQuotaService
 {
     public async Task<QuotaSnapshot> ReadAsync(Dependencies dependencies, string home, CancellationToken cancellationToken = default)
+        => Parse(await RequestAsync(dependencies, home, "account/rateLimits/read", null, cancellationToken));
+
+    public async Task<string> ConsumeResetAsync(Dependencies dependencies, string home, string idempotencyKey, CancellationToken cancellationToken = default)
+    {
+        if (!Guid.TryParse(idempotencyKey, out _)) throw new ArgumentException("Invalid reset attempt ID.");
+        var result = await RequestAsync(dependencies, home, "account/rateLimitResetCredit/consume", new { idempotencyKey }, cancellationToken);
+        return ParseResetOutcome(result);
+    }
+
+    public static string ParseResetOutcome(JsonElement result) => Text(result, "outcome") switch
+    {
+        "reset" => "reset", "alreadyRedeemed" => "alreadyRedeemed", "noCredit" => "noCredit", "nothingToReset" => "nothingToReset",
+        _ => throw new IOException("Unknown reset outcome. Retry the same attempt to confirm its result.")
+    };
+
+    private static async Task<JsonElement> RequestAsync(Dependencies dependencies, string home, string method, object? parameters, CancellationToken cancellationToken)
     {
         if (dependencies.NativeCodex is null) throw new IOException("Codex executable not found for quota queries.");
         PathSafety.OrdinaryDirectory(home);
@@ -30,8 +46,8 @@ public sealed class CodexQuotaService
             await Send(new { id = 1, method = "initialize", @params = new { clientInfo = new { name = "codex_account_manager", version = "1.2.0" } } });
             _ = await Receive(1);
             await Send(new { method = "initialized", @params = new { } });
-            await Send(new { id = 2, method = "account/rateLimits/read" });
-            return Parse(await Receive(2));
+            await Send(new { id = 2, method, @params = parameters });
+            return await Receive(2);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         { throw new TimeoutException("Quota request timed out after 30 seconds. Please Refresh."); }

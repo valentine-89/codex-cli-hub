@@ -13,6 +13,7 @@ public sealed class Account
     public QuotaSnapshot? Quota { get; set; }
     public string? QuotaError { get; set; }
     public long LastAutoRefreshReset { get; set; }
+    public string? PendingResetAttempt { get; set; }
 }
 
 public sealed class AccountDocument

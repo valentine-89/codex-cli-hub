@@ -12,6 +12,14 @@ Khi app đang mở, mỗi mốc reset quota đã biết kích hoạt Refresh m�
 để không lặp sau lỗi/khởi động lại. Khi mở lại app sau giờ reset, mốc chưa thử sẽ được xử lý.
 Refresh thất bại có thể thử lại bằng nút **Refresh**. App không tự mở khi đang tắt.
 
+V1.6: Refresh tự động chạy nền từng tài khoản; chờ 2 giây sau khởi động và giữa các lượt.
+Giao diện vẫn thao tác được, chỉ thẻ đang Refresh tạm khóa. Đóng app sẽ hủy lượt nền đang chạy.
+Menu **••• → Use reset credit…** dùng một lượt reset có sẵn sau khi xác nhận tên tài khoản.
+App không mua lượt reset. Nếu kết quả chưa xác định do lỗi mạng, **Retry reset attempt…** dùng lại
+mã lần thử đã lưu để không dùng thêm lượt. Hoàn tất lần thử trước khi đăng nhập lại tài khoản đó.
+Refresh tự động không bao giờ dùng lượt reset. Chức năng này dùng
+[giao thức chính thức](https://learn.chatgpt.com/docs/app-server) `account/rateLimitResetCredit/consume`.
+
 [Tải bản mới nhất](https://github.com/valentine-89/codex-cli-hub/releases/latest) ·
 [Changelog](CHANGELOG.md) · [Đóng góp](CONTRIBUTING.md) · [Bảo mật](SECURITY.md) · [MIT](LICENSE)
 

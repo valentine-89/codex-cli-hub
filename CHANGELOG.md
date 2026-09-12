@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.0 — 2026-09-12
+
+- Run automatic quota refresh in the background without locking the whole interface, one account at a time, with a two-second delay after startup and between completed attempts.
+- Reuse detected CLI dependencies and avoid scanning/writing every profile config on startup.
+- Add Use reset credit to each card's menu with account-specific confirmation and persistent idempotency keys for uncertain retries.
+- Cancel background quota work when the manager closes.
+
 ## 1.5.1 — 2026-09-12
 
 - Wait 60 seconds after the quota reset timestamp before the one-time automatic Refresh to allow for server delay.

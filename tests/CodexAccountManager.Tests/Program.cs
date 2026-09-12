@@ -1,5 +1,24 @@
 using CodexAccountManager.Core;
 
+// Synthetic app-server for protocol tests; never reads credentials or contacts a server.
+if (args.Contains("app-server"))
+{
+    while (Console.ReadLine() is { } line)
+    {
+        using var request = System.Text.Json.JsonDocument.Parse(line);
+        var json = request.RootElement;
+        if (!json.TryGetProperty("id", out var id)) continue;
+        var method = json.GetProperty("method").GetString();
+        if (method == "account/rateLimitResetCredit/consume")
+        {
+            var key = json.GetProperty("params").GetProperty("idempotencyKey").GetString();
+            Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { id = id.GetInt32(), result = new { outcome = key == "00000000-0000-0000-0000-000000000001" ? "alreadyRedeemed" : "noCredit" } }));
+        }
+        else Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { id = id.GetInt32(), result = new { } }));
+    }
+    return 0;
+}
+
 if (args.Length == 1 && args[0] == "--echo-stdin")
 {
     Console.InputEncoding = new System.Text.UTF8Encoding(false); Console.OutputEncoding = new System.Text.UTF8Encoding(false);
@@ -452,6 +471,35 @@ Test("quota parser preserves plan and duration metadata", () =>
     var quota = CodexQuotaService.Parse(json.RootElement);
     Assert(quota.PlanType == "plus" && quota.Lines.Single().WindowDurationMins == 300, "Plan or duration missing");
 });
+Test("background queue spaces accounts by two seconds and rejects overlap", () =>
+{
+    var gate = new RefreshQueueGate(); var now = DateTimeOffset.UtcNow; gate.DelayStart(now);
+    Assert(!gate.TryStart("a", now.AddMilliseconds(1999)), "Startup delay missing");
+    Assert(gate.TryStart("a", now.AddSeconds(2)), "First account not started");
+    Assert(!gate.TryStart("b", now.AddSeconds(30)), "Concurrent background refresh allowed");
+    gate.Complete(now.AddSeconds(30));
+    Assert(!gate.TryStart("b", now.AddSeconds(31)), "Completion delay missing");
+    Assert(gate.TryStart("b", now.AddSeconds(32)), "Next account not started");
+});
+tests.Add(("reset protocol uses isolated profile and stable attempt key", async () =>
+{
+    var f = Fixture(); var account = f.Create("Reset fixture"); var repo = new AccountRepository(f.App);
+    account.PendingResetAttempt = "00000000-0000-0000-0000-000000000001";
+    repo.SaveAccounts(new AccountDocument { Accounts = [account] });
+    var key = repo.LoadAccounts().Accounts.Single().PendingResetAttempt!;
+    var service = new CodexQuotaService();
+    var deps = new Dependencies(null, null, false, Environment.ProcessPath!);
+    Assert(await service.ConsumeResetAsync(deps, f.Path(account), key) == "alreadyRedeemed", "Wrong method, key or result");
+    Assert(await service.ConsumeResetAsync(deps, f.Path(account), key) == "alreadyRedeemed", "Retry changed key");
+    Assert(await service.ConsumeResetAsync(deps, f.Path(account), Guid.NewGuid().ToString()) == "noCredit", "No-credit result lost");
+    foreach (var outcome in new[] { "reset", "nothingToReset", "alreadyRedeemed", "noCredit" })
+    {
+        using var response = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(new { outcome }));
+        Assert(CodexQuotaService.ParseResetOutcome(response.RootElement) == outcome, "Outcome altered");
+    }
+    using var unknown = System.Text.Json.JsonDocument.Parse("{\"outcome\":\"unknown\"}");
+    Reject(() => CodexQuotaService.ParseResetOutcome(unknown.RootElement));
+}));
 var failures = 0;
 try
 {

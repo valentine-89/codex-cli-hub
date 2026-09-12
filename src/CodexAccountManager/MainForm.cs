@@ -20,6 +20,8 @@ public sealed class MainForm : Form
     private readonly Panel header = new() { Dock = DockStyle.Fill };
     private readonly ToolTip tips = new();
     private bool busy;
+    private readonly RefreshQueueGate refreshQueue = new();
+    private readonly CancellationTokenSource lifetime = new();
     private readonly System.Windows.Forms.Timer resetTimer = new() { Interval = 1000 };
     private readonly TaskCompletionSource ready = new();
     public Task Ready => ready.Task;
@@ -56,14 +58,13 @@ public sealed class MainForm : Form
                 await Run(async () =>
                 {
                     await RefreshDependencies();
-                    foreach (var account in accounts.Accounts) CredentialConfig.EnsureFile(profiles.Validate(account, settings));
                 });
             }
-            finally { ready.TrySetResult(); resetTimer.Start(); }
+            finally { ready.TrySetResult(); refreshQueue.DelayStart(DateTimeOffset.UtcNow); resetTimer.Start(); }
         };
         resetTimer.Tick += async (_, _) => await RefreshDueAccounts();
         FormClosing += (_, e) => { if (busy) { e.Cancel = true; status.Text = "Please wait for the current operation."; } };
-        FormClosed += (_, _) => { resetTimer.Stop(); resetTimer.Dispose(); tips.Dispose(); logo.Image?.Dispose(); };
+        FormClosed += (_, _) => { lifetime.Cancel(); resetTimer.Stop(); resetTimer.Dispose(); tips.Dispose(); logo.Image?.Dispose(); };
     }
 
     private Button ActionButton(string text, Func<Task> action, bool primary = false, int width = 100)
@@ -113,6 +114,7 @@ public sealed class MainForm : Form
         var card = new AccountCard { Height = 208 + quotaRows * 25,
             BackColor = golden ? (low ? Color.FromArgb(250, 244, 221) : Color.FromArgb(245, 218, 140))
                 : low ? Color.FromArgb(225, 228, 231) : Color.White };
+        card.Enabled = refreshQueue.ActiveAccountId != account.Id;
         var body = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 7, Margin = Padding.Empty };
         foreach (var height in new[] { 30, 28, 27, quotaRows * 25, 25, 29, 38 }) body.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
         var heading = Theme.Label(account.DisplayName, true); heading.Font = new Font("Segoe UI", 12, FontStyle.Bold);
@@ -152,6 +154,7 @@ public sealed class MainForm : Form
         void Item(string text, Func<Task> action) { var item = menu.Items.Add(text); item.Click += async (_, _) => await Run(action); }
         Item("Log in again", () => Launch(account, CodexAction.Login)); Item("Resume in CLI", () => Launch(account, CodexAction.Resume));
         Item("Open folder", () => OpenFolder(account));
+        Item(account.PendingResetAttempt is null ? "Use reset credit…" : "Retry reset attempt…", () => UseResetCredit(account));
         Item("Details", () =>
         {
             using var dialog = new AccountDetailsForm(account, PathSafety.Profile(repository.Root, account), Path.Combine(settings.DefaultCodexHome, "sessions"));
@@ -189,6 +192,8 @@ public sealed class MainForm : Form
     }
     private Task Launch(Account account, CodexAction action)
     {
+        if (action == CodexAction.Login && account.PendingResetAttempt is not null)
+            throw new IOException("Resolve the pending reset attempt before changing this account's login.");
         var path = profiles.Validate(account, settings);
         CredentialConfig.EnsureFile(path);
         var workingDirectory = settings.WorkingDirectory;
@@ -215,22 +220,65 @@ public sealed class MainForm : Form
     }
     private async Task RefreshDueAccounts()
     {
-        if (busy || IsDisposed) return;
-        foreach (var account in accounts.Accounts.ToArray())
+        if (busy || IsDisposed || lifetime.IsCancellationRequested || refreshQueue.ActiveAccountId is not null) return;
+        var account = accounts.Accounts.FirstOrDefault(a => QuotaPresentation.DueReset(a, DateTimeOffset.UtcNow) is not null);
+        if (account is null || !refreshQueue.TryStart(account.Id, DateTimeOffset.UtcNow)) return;
+        var due = QuotaPresentation.DueReset(account, DateTimeOffset.UtcNow)!.Value;
+        try
         {
-            var due = QuotaPresentation.DueReset(account, DateTimeOffset.UtcNow);
-            if (due is null) continue;
-            await Run(async () =>
+            var previous = account.LastAutoRefreshReset;
+            account.LastAutoRefreshReset = due;
+            try { repository.SaveAccounts(accounts); }
+            catch { account.LastAutoRefreshReset = previous; resetTimer.Stop(); throw; }
+            RenderAccounts();
+            var currentSettings = settings; var currentDependencies = dependencies; var token = lifetime.Token;
+            var snapshot = await Task.Run(async () =>
             {
-                var previous = account.LastAutoRefreshReset;
-                account.LastAutoRefreshReset = due.Value;
-                try { repository.SaveAccounts(accounts); }
-                catch { account.LastAutoRefreshReset = previous; resetTimer.Stop(); throw; }
-                // Persist the attempt before networking so failures/restarts cannot repeat it.
-                try { await Check(account); }
-                catch (Exception) { status.Text = "Automatic refresh failed. Use Refresh to retry."; }
-            });
+                var path = profiles.Validate(account, currentSettings); CredentialConfig.EnsureFile(path);
+                return await quotaService.ReadAsync(currentDependencies, path, token);
+            }, token);
+            if (lifetime.IsCancellationRequested) return;
+            account.Quota = snapshot; account.QuotaError = null; account.LastCheckedAt = DateTimeOffset.UtcNow;
+            repository.SaveAccounts(accounts);
         }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception)
+        {
+            if (!lifetime.IsCancellationRequested)
+            {
+                account.QuotaError = "Automatic refresh failed. Use Refresh to retry.";
+                if (!busy) status.Text = account.QuotaError;
+            }
+        }
+        finally
+        {
+            refreshQueue.Complete(DateTimeOffset.UtcNow);
+            if (!lifetime.IsCancellationRequested && !busy) RenderAccounts();
+        }
+    }
+    private async Task UseResetCredit(Account account)
+    {
+        if (MessageBox.Show(this, $"Use one available reset credit for {account.DisplayName}?\n\nThis uses an existing credit for this account and cannot be undone. No credits will be purchased.",
+            "Use reset credit", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
+        var path = profiles.Validate(account, settings); CredentialConfig.EnsureFile(path);
+        account.PendingResetAttempt ??= Guid.NewGuid().ToString();
+        repository.SaveAccounts(accounts);
+        string outcome;
+        try { outcome = await quotaService.ConsumeResetAsync(dependencies, path, account.PendingResetAttempt); }
+        catch (Exception) { throw new IOException("Reset result is uncertain. Choose Retry reset attempt to check the same attempt without consuming another credit."); }
+        var completedAttempt = account.PendingResetAttempt;
+        account.PendingResetAttempt = null;
+        try { repository.SaveAccounts(accounts); }
+        catch { account.PendingResetAttempt = completedAttempt; throw; }
+        var message = outcome switch
+        {
+            "reset" => "Reset credit used successfully.", "alreadyRedeemed" => "This reset attempt was already completed.",
+            "noCredit" => "No reset credits available.", _ => "No quota window is eligible for reset."
+        };
+        try { await Check(account); }
+        catch (Exception) { message += " Refresh failed; use Refresh to update quota."; }
+        status.Text = message;
+        MessageBox.Show(this, message, "Reset credit", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
     private Task Delete(Account account)
     {

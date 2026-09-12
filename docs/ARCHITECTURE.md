@@ -43,6 +43,11 @@ the shared sessions directory.
 - Apply: after confirmation to close the main Codex clients, atomically replace only the
   configured default home's `auth.json`. The manager does not terminate Codex processes.
 - Details: edit name/note without changing the account ID, profile or authentication.
+- Automatic Refresh: one background request at a time, two seconds after startup and after each
+  completion. Only the active card is disabled; dependency detection is reused. Closing cancels the request.
+- Use reset credit: explicit per-account confirmation invokes the official consume method in that
+  profile's isolated app-server. Persist the idempotency key before sending; uncertain retries reuse
+  it across restarts. This operation never purchases credits or runs from the automatic timer.
 
 ## Distribution boundary
 
