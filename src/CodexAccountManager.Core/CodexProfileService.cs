@@ -46,7 +46,25 @@ public sealed class CodexProfileService(string root, JunctionService junctions)
             auth.CopyTo(destination); destination.Flush(true);
         }
         junctions.Create(Path.Combine(profile, "sessions"), target);
+        PrepareSharedStore(account, settings);
         return account;
+    }
+
+    // Run before every interactive launch, including existing profiles. SQLite owns
+    // thread names, recency, projects and paginated history in current Codex.
+    public string PrepareSharedStore(Account account, AppSettings settings)
+    {
+        var profile = Validate(account, settings);
+        var home = PathSafety.Canonical(settings.DefaultCodexHome);
+        var archive = Path.Combine(home, "archived_sessions");
+        var link = Path.Combine(profile, "archived_sessions");
+        PathSafety.NoReparseAncestors(archive);
+        Directory.CreateDirectory(archive);
+        if (PathSafety.Exists(link)) junctions.Verify(link, archive);
+        else junctions.Create(link, archive);
+        CredentialConfig.Update(profile, text => CredentialConfig.SetRootString(
+            CredentialConfig.UseFile(text), "sqlite_home", home));
+        return profile;
     }
 
     public string Validate(Account account, AppSettings settings)
@@ -98,8 +116,13 @@ public sealed class CodexProfileService(string root, JunctionService junctions)
         // Pin every existing ancestor, so a rename cannot redirect path-based traversal.
         using var pins = PinAncestors(profile);
         using var targetPins = PinAncestors(target);
-        ValidateTree(profile, Path.Combine(profile, "sessions"));
+        var archiveLink = Path.Combine(profile, "archived_sessions");
+        var archiveTarget = Path.Combine(settings.DefaultCodexHome, "archived_sessions");
+        var hasArchiveLink = PathSafety.Exists(archiveLink);
+        if (hasArchiveLink) junctions.Verify(archiveLink, archiveTarget);
+        ValidateTree(profile, Path.Combine(profile, "sessions"), hasArchiveLink ? archiveLink : null);
         junctions.Verify(Path.Combine(profile, "sessions"), target);
+        if (hasArchiveLink) junctions.Remove(archiveLink, archiveTarget);
         junctions.Remove(Path.Combine(profile, "sessions"), target);
         DeleteContents(profile);
         pins.Dispose();
@@ -126,15 +149,15 @@ public sealed class CodexProfileService(string root, JunctionService junctions)
         public void Dispose() { foreach (var item in Items.AsEnumerable().Reverse()) item.Dispose(); Items.Clear(); }
     }
 
-    private static void ValidateTree(string directory, string permittedJunction)
+    private static void ValidateTree(string directory, string permittedJunction, string? permittedArchive)
     {
         using var pin = JunctionService.PinDirectory(directory);
         foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
         {
-            if (PathSafety.Same(entry, permittedJunction)) continue;
+            if (PathSafety.Same(entry, permittedJunction) || (permittedArchive is not null && PathSafety.Same(entry, permittedArchive))) continue;
             var attributes = File.GetAttributes(entry);
             if ((attributes & FileAttributes.ReparsePoint) != 0) throw new IOException($"Delete aborted: unexpected reparse point: {entry}");
-            if ((attributes & FileAttributes.Directory) != 0) ValidateTree(entry, permittedJunction);
+            if ((attributes & FileAttributes.Directory) != 0) ValidateTree(entry, permittedJunction, permittedArchive);
         }
     }
 

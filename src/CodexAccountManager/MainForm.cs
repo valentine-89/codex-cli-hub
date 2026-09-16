@@ -138,7 +138,7 @@ public sealed class MainForm : Form
         if (!string.IsNullOrWhiteSpace(account.Quota?.PlanType)) state += " · " + account.Quota.PlanType;
         var login = Theme.Label(state); tips.SetToolTip(login, state); login.ForeColor = account.LoginStatus.StartsWith("Logged in", StringComparison.Ordinal) ? Theme.Accent : Theme.Muted;
         string shared;
-        try { profiles.Validate(account, settings); shared = "Shared sessions ✓"; }
+        try { profiles.Validate(account, settings); shared = "Session files linked"; }
         catch (Exception ex) { shared = "Check shared sessions"; tips.SetToolTip(card, ex.Message); }
         var sharedLabel = Theme.Label(shared); tips.SetToolTip(sharedLabel, shared);
         body.Controls.Add(Columns(login, sharedLabel, 140), 0, 1);
@@ -210,8 +210,7 @@ public sealed class MainForm : Form
     {
         if (action == CodexAction.Login && account.PendingResetAttempt is not null)
             throw new IOException("Resolve the pending reset attempt before changing this account's login.");
-        var path = profiles.Validate(account, settings);
-        CredentialConfig.EnsureFile(path);
+        var path = profiles.PrepareSharedStore(account, settings);
         var workingDirectory = settings.WorkingDirectory;
         if (action == CodexAction.Open)
         {
@@ -219,7 +218,7 @@ public sealed class MainForm : Form
             if (picker.ShowDialog(this) != DialogResult.OK || picker.SelectedDirectory is null) return Task.CompletedTask;
             workingDirectory = picker.SelectedDirectory;
         }
-        launcher.Launch(dependencies, account.Id, path, workingDirectory, action);
+        launcher.Launch(dependencies, account.Id, path, workingDirectory, action, settings.DefaultCodexHome);
         logger.Write("launch:" + action, path); status.Text = "Opened " + account.DisplayName; return Task.CompletedTask;
     }
     private async Task Check(Account account)

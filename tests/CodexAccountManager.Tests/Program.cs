@@ -58,6 +58,18 @@ if (args.Length == 2 && args[0] == "--catalog")
     return 0;
 }
 
+if (args.Length == 2 && args[0] == "--prepare-shared-store")
+{
+    var repo = new AccountRepository(args[1]); using var appLock = repo.AcquireLock();
+    var service = new CodexProfileService(repo.Root, new JunctionService());
+    foreach (var account in repo.LoadAccounts().Accounts)
+    {
+        service.PrepareSharedStore(account, repo.LoadSettings());
+        Console.WriteLine("Shared store prepared: " + account.Id);
+    }
+    return 0;
+}
+
 var root = Path.Combine(Path.GetTempPath(), "CodexManagerTests-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
 var tests = new List<(string Name, Func<Task> Run)>();
@@ -89,6 +101,38 @@ Test("real sessions directory aborts before any deletion", () =>
     File.WriteAllText(Path.Combine(f.Link(a), "keep"), "keep");
     Reject(() => f.Service.Delete(a, f.Settings));
     Assert(File.Exists(Path.Combine(f.Link(a), "keep")) && File.Exists(Path.Combine(f.Path(a), "config.toml")), "Files removed on abort");
+});
+Test("shared archive survives deletion and conflicting archive fails before mutation", () =>
+{
+    var f = Fixture(); var a = f.Create("A"); var b = f.Create("B");
+    var target = Path.Combine(f.Settings.DefaultCodexHome, "archived_sessions");
+    File.WriteAllText(Path.Combine(target, "keep.jsonl"), "archive-sentinel");
+    var link = Path.Combine(f.Path(a), "archived_sessions");
+    f.Junctions.Remove(link, target); Directory.CreateDirectory(link);
+    File.WriteAllText(Path.Combine(link, "private.jsonl"), "private-sentinel");
+    var before = File.ReadAllText(Path.Combine(f.Path(a), "config.toml"));
+    Reject(() => f.Service.PrepareSharedStore(a, f.Settings));
+    Reject(() => f.Service.Delete(a, f.Settings));
+    Assert(File.ReadAllText(Path.Combine(link, "private.jsonl")) == "private-sentinel", "Private archive lost");
+    Assert(File.ReadAllText(Path.Combine(f.Path(a), "config.toml")) == before && PathSafety.Exists(f.Link(a)), "Partial mutation on failure");
+    f.Service.Delete(b, f.Settings);
+    Assert(File.ReadAllText(Path.Combine(target, "keep.jsonl")) == "archive-sentinel", "Shared archive deleted");
+});
+Test("existing profiles converge on shared SQLite home without touching private credentials", () =>
+{
+    var f = Fixture(); var a = f.Create("A"); var b = f.Create("B");
+    var config = Path.Combine(f.Path(a), "config.toml");
+    File.WriteAllText(config, "prompt = '''\nsqlite_home = 'keep prompt'\n'''\n'sqlite_home' = 'old' # retain\n[mcp_servers.x]\ncommand = 'keep'\n");
+    File.WriteAllText(Path.Combine(f.Path(a), "auth.json"), "private-a");
+    var archive = Path.Combine(f.Settings.DefaultCodexHome, "archived_sessions");
+    f.Junctions.Remove(Path.Combine(f.Path(a), "archived_sessions"), archive);
+    f.Service.PrepareSharedStore(a, f.Settings);
+    var once = File.ReadAllText(config); f.Service.PrepareSharedStore(a, f.Settings);
+    Assert(once == File.ReadAllText(config), "Preparation is not idempotent");
+    Assert(once.Contains("sqlite_home = 'keep prompt'") && once.Contains("# retain") && once.Contains("command = 'keep'"), "Unrelated TOML changed");
+    Assert(once.Contains(System.Text.Json.JsonSerializer.Serialize(f.Settings.DefaultCodexHome)), "Wrong SQLite home");
+    Assert(File.ReadAllText(Path.Combine(f.Path(a), "auth.json")) == "private-a", "Authentication changed");
+    Assert(PathSafety.Same(f.Junctions.GetTarget(Path.Combine(f.Path(b), "archived_sessions")), archive), "Profiles do not share archive");
 });
 Test("wrong junction target aborts before deletion", () =>
 {
@@ -216,7 +260,7 @@ Test("new login copies settings while enforcing file credentials without copying
     var toml = "# Unicode thử nghiệm\r\nmodel = \"example-model\"\r\ncli_auth_credentials_store = \"keyring\"\r\n[mcp_servers.test]\r\ncommand = \"test\"\r\n";
     File.WriteAllText(original, toml); File.WriteAllText(Path.Combine(f.Settings.DefaultCodexHome, "auth.json"), "test-only");
     var a = f.Service.Create("New login", "", f.Settings, false);
-    Assert(File.ReadAllText(Path.Combine(f.Path(a), "config.toml")) == toml.Replace("\"keyring\"", "\"file\""), "Unrelated TOML changed or file credentials not enforced");
+    Assert(File.ReadAllText(Path.Combine(f.Path(a), "config.toml")).EndsWith(toml.Replace("\"keyring\"", "\"file\"")), "Unrelated TOML changed or file credentials not enforced");
     Assert(!File.Exists(Path.Combine(f.Path(a), "auth.json")), "New login copied credentials without opt-in");
     Assert(File.ReadAllText(original) == toml, "Original config changed");
 });
@@ -303,6 +347,15 @@ Test("session projects sort by name then path with missing directories last", ()
     }
     var result = new SessionProjectCatalog().Read(f.Shared);
     Assert(result.Projects.Select(p => p.Directory).SequenceEqual(new[] { paths[2], paths[0], paths[1], paths[3] }), "Incorrect alphabetical ordering");
+});
+Test("catalog normalizes device paths and existing WSL drive mounts only", () =>
+{
+    var f = Fixture();
+    Assert(PathSafety.Same(SessionProjectCatalog.NormalizeWorkingDirectory(@"\\?\" + f.App), f.App), "Device prefix not normalized");
+    var mount = "/mnt/" + char.ToLowerInvariant(f.App[0]) + f.App[2..].Replace('\\', '/');
+    Assert(PathSafety.Same(SessionProjectCatalog.NormalizeWorkingDirectory(mount), f.App), "Existing WSL mount not mapped");
+    Reject(() => SessionProjectCatalog.NormalizeWorkingDirectory(mount + "/missing"));
+    Reject(() => SessionProjectCatalog.NormalizeWorkingDirectory(@"\\?\UNC\server\share"));
 });
 Test("session catalog skips nested links and supports large metadata headers", () =>
 {
@@ -403,15 +456,16 @@ tests.Add(("PowerShell argument quoting and process environment isolation", asyn
     var f = Fixture(); var deps = await DependencyDetector.DetectAsync(); deps.Require();
     var special = Path.Combine(f.Root, "Tài khoản ' ; $() & space"); Directory.CreateDirectory(special);
     var fake = Path.Combine(special, "fake codex.ps1");
-    File.WriteAllText(fake, "[Console]::Out.WriteLine($env:CODEX_HOME); [Console]::Out.WriteLine(($args -join '|')); if ($env:OPENAI_API_KEY) { exit 23 }");
+    File.WriteAllText(fake, "[Console]::Out.WriteLine($env:CODEX_HOME); [Console]::Out.WriteLine($env:CODEX_SQLITE_HOME); [Console]::Out.WriteLine(($args -join '|')); if ($env:OPENAI_API_KEY) { exit 23 }");
     var original = Environment.GetEnvironmentVariable("CODEX_HOME");
     var originalKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
     try
     {
         Environment.SetEnvironmentVariable("OPENAI_API_KEY", "test-only");
-        var script = CodexProcessLauncher.BuildScript(fake, special, special, CodexAction.Resume);
+        var script = CodexProcessLauncher.BuildScript(fake, special, special, CodexAction.Resume, f.Settings.DefaultCodexHome);
         var result = await ShellRunner.RunAsync(deps.PowerShell!, script, special);
         Assert(result.ExitCode == 0 && result.Output.Contains(special) && result.Output.Contains("resume|--all"), "Quoting or isolation failed");
+        Assert(result.Output.Contains(f.Settings.DefaultCodexHome) && result.Output.Contains("sqlite_home="), "Shared SQLite override missing");
         Assert(Environment.GetEnvironmentVariable("CODEX_HOME") == original, "Parent environment changed");
     }
     finally { Environment.SetEnvironmentVariable("OPENAI_API_KEY", originalKey); }
@@ -425,7 +479,7 @@ tests.Add(("login exits only on success in PowerShell 7 and 5.1", async () =>
         foreach (var code in new[] { 0, 1 })
         {
             var fake = Path.Combine(f.Root, "fake-login.ps1"); File.WriteAllText(fake, "exit " + code);
-            var script = CodexProcessLauncher.BuildScript(fake, f.App, f.App, CodexAction.Login) + "; [Console]::Out.WriteLine('terminal-kept'); exit 37";
+            var script = CodexProcessLauncher.BuildScript(fake, f.App, f.App, CodexAction.Login, f.Settings.DefaultCodexHome) + "; [Console]::Out.WriteLine('terminal-kept'); exit 37";
             var result = await ShellRunner.RunAsync(shell, script, f.App);
             Assert(code == 0 ? result.ExitCode == 0 && !result.Output.Contains("terminal-kept") : result.ExitCode == 37 && result.Output.Contains("terminal-kept"), "Login exit behavior incorrect");
         }

@@ -1,4 +1,20 @@
-# Validation — v1.8.0, 2026-09-12
+# Validation — v1.9.0, 2026-09-16
+
+- Release build: zero warnings/errors; 44/44 .NET tests and 2/2 Python maintenance tests passed.
+- Synthetic tests cover existing-profile preparation, preserving account credentials and unrelated TOML,
+  archive-junction conflict rejection, safe account deletion, shell override quoting, and project path normalization.
+- Maintenance tests cover dry-run, idempotent import of paginated history, preservation of newer Desktop
+  records, and metadata cwd repair with unchanged JSONL byte offsets and unchanged conversation messages.
+- Two concurrent official CLI 0.154.0 app-server processes, using two real profile configs without a test
+  sqlite override, returned the same newest PVoil Desktop task and names through `thread/list`.
+- Repaired the old PVoil cwd in SQLite and three rollout metadata fields. Both processes listed the repaired
+  task under the real Windows directory and read its four persisted turns through `thread/turns/list`.
+- Prepared all seven existing profiles and imported nine CLI-only threads with their paginated history.
+  No model turn was sent, no account credentials changed, and original private databases were retained.
+- WinForms fixture rendering inspected. CLI acceptance used the picker backend; no interactive model
+  conversation was started. Existing terminals must be reopened to load the shared-store configuration.
+
+## Previous validation — v1.8.0
 
 - Windows x64, SDK 8.0.424, Codex CLI 0.153.4.
 - Release build: zero warnings/errors; **41/41 tests passed**.

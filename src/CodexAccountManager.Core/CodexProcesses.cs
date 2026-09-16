@@ -107,7 +107,7 @@ public static class ShellRunner
     ["OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "OPENAI_ACCESS_TOKEN",
      "CODEX_THREAD_ID", "CODEX_INTERNAL_ORIGINATOR_OVERRIDE", "CODEX_REMOTE", "CODEX_REMOTE_AUTH_TOKEN",
      "CODEX_APP_SERVER_URL", "CODEX_APP_SERVER_AUTH_TOKEN", "CODEX_SESSION_ID", "CODEX_APP_TOOLS_PIPE_PATH",
-     "CODEX_CI", "CODEX_PERMISSION_PROFILE", "CODEX_SHELL", "CODEX_MCP_NODE_PATH", "CODEX_SAGE_BACKFILL_TRACKER_TAB_REUSE"];
+     "CODEX_CI", "CODEX_PERMISSION_PROFILE", "CODEX_SHELL", "CODEX_MCP_NODE_PATH", "CODEX_SAGE_BACKFILL_TRACKER_TAB_REUSE", "CODEX_SQLITE_HOME"];
 }
 
 public enum CodexAction { Open, Login, Resume }
@@ -115,18 +115,21 @@ public enum CodexAction { Open, Login, Resume }
 public sealed class CodexProcessLauncher
 {
     private readonly Dictionary<string, List<Process>> terminals = [];
-    public static string BuildScript(string codex, string home, string workingDirectory, CodexAction action)
+    public static string BuildScript(string codex, string home, string workingDirectory, CodexAction action, string sharedHome)
     {
         var args = action switch { CodexAction.Login => " login", CodexAction.Resume => " resume --all", _ => "" };
         var clear = string.Join("; ", ShellRunner.IsolatedEnvironmentVariables.Select(k => "Remove-Item Env:" + k + " -ErrorAction SilentlyContinue"));
+        var shared = PathSafety.Canonical(sharedHome);
+        var sqliteOverride = ShellRunner.Quote("sqlite_home=" + System.Text.Json.JsonSerializer.Serialize(shared));
         return "$ErrorActionPreference = 'Stop'; $env:CODEX_HOME = " + ShellRunner.Quote(PathSafety.Canonical(home))
             + "; " + clear + "; " + ShellRunner.Utf8Setup
+            + "$env:CODEX_SQLITE_HOME = " + ShellRunner.Quote(shared) + "; "
             + "Set-Location -LiteralPath " + ShellRunner.Quote(PathSafety.Canonical(workingDirectory))
-            + "; $LASTEXITCODE = $null; & " + ShellRunner.Quote(codex) + " -c 'cli_auth_credentials_store=\"file\"'" + args
+            + "; $LASTEXITCODE = $null; & " + ShellRunner.Quote(codex) + " -c 'cli_auth_credentials_store=\"file\"' -c " + sqliteOverride + args
             + (action == CodexAction.Login ? "; if ($? -and $LASTEXITCODE -eq 0) { exit 0 }" : "");
     }
 
-    public void Launch(Dependencies dependencies, string id, string home, string workingDirectory, CodexAction action)
+    public void Launch(Dependencies dependencies, string id, string home, string workingDirectory, CodexAction action, string sharedHome)
     {
         dependencies.Require();
         PathSafety.OrdinaryDirectory(workingDirectory);
@@ -134,7 +137,7 @@ public sealed class CodexProcessLauncher
             WorkingDirectory = workingDirectory, WindowStyle = ProcessWindowStyle.Normal };
         info.ArgumentList.Add("-NoLogo"); info.ArgumentList.Add("-NoProfile"); info.ArgumentList.Add("-NoExit");
         info.ArgumentList.Add("-EncodedCommand");
-        info.ArgumentList.Add(ShellRunner.Encode(BuildScript(dependencies.Codex!, home, workingDirectory, action)));
+        info.ArgumentList.Add(ShellRunner.Encode(BuildScript(dependencies.Codex!, home, workingDirectory, action, sharedHome)));
         var process = Process.Start(info) ?? throw new IOException("Unable to open the terminal.");
         if (!terminals.TryGetValue(id, out var list)) terminals[id] = list = [];
         list.Add(process);

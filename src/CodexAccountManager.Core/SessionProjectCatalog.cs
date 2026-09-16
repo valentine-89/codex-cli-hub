@@ -35,7 +35,7 @@ public sealed class SessionProjectCatalog
                         if (!entry.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase)) continue;
                         var cwd = ReadWorkingDirectory(entry, metadataBuffer);
                         if (cwd is null) { skipped++; continue; }
-                        var path = PathSafety.Canonical(cwd);
+                        var path = NormalizeWorkingDirectory(cwd);
                         var lastUsed = File.GetLastWriteTimeUtc(entry);
                         projects.TryGetValue(path, out var previous);
                         projects[path] = new(path, previous is not null && previous.LastUsedUtc > lastUsed ? previous.LastUsedUtc : lastUsed,
@@ -50,6 +50,20 @@ public sealed class SessionProjectCatalog
         return new(projects.Values.OrderByDescending(p => p.Exists)
             .ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(p => p.Directory, StringComparer.OrdinalIgnoreCase).ToArray(), skipped);
+    }
+
+    // Historical metadata may use a Windows device prefix or a WSL drive mount.
+    // Only map a WSL drive when its Windows directory actually exists.
+    public static string NormalizeWorkingDirectory(string cwd)
+    {
+        if (cwd.StartsWith(@"\\?\", StringComparison.Ordinal) && cwd.Length > 6 && cwd[5] == ':') cwd = cwd[4..];
+        if (cwd.StartsWith("/mnt/", StringComparison.Ordinal) && cwd.Length > 7
+            && char.IsAsciiLetter(cwd[5]) && cwd[6] == '/')
+        {
+            var candidate = char.ToUpperInvariant(cwd[5]) + @":\" + cwd[7..].Replace('/', '\\');
+            if (Directory.Exists(candidate)) cwd = candidate;
+        }
+        return PathSafety.Canonical(cwd);
     }
 
     private static string? ReadWorkingDirectory(string file, byte[] buffer)

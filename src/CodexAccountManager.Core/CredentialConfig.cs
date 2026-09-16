@@ -5,12 +5,15 @@ namespace CodexAccountManager.Core;
 
 public static class CredentialConfig
 {
-    private static readonly Regex Assignment = new("\\G(?:cli_auth_credentials_store|\"cli_auth_credentials_store\"|'cli_auth_credentials_store')[ \\t]*=[ \\t]*", RegexOptions.CultureInvariant);
-
     // A targeted lexical edit preserves comments, whitespace and unrelated TOML verbatim.
     // Strings/arrays are skipped so a key in a multiline prompt cannot be mistaken for configuration.
-    public static string UseFile(string text)
+    public static string UseFile(string text) => SetRootString(text, "cli_auth_credentials_store", "file");
+
+    public static string SetRootString(string text, string key, string value)
     {
+        var escapedKey = Regex.Escape(key);
+        var assignment = new Regex("\\G(?:" + escapedKey + "|\"" + escapedKey + "\"|'" + escapedKey + "')[ \\t]*=[ \\t]*", RegexOptions.CultureInvariant);
+        var literal = System.Text.Json.JsonSerializer.Serialize(value);
         var lineStart = true; var depth = 0; var foundStart = -1; var foundEnd = -1;
         for (var i = 0; i < text.Length;)
         {
@@ -21,13 +24,13 @@ public static class CredentialConfig
             if (lineStart && depth == 0)
             {
                 if (c == '[') break; // Remaining assignments belong to tables, not the root config.
-                var match = Assignment.Match(text, i);
+                var match = assignment.Match(text, i);
                 if (match.Success)
                 {
-                    if (foundStart >= 0) throw new IOException("config.toml has duplicate credential store keys; file was not changed.");
+                    if (foundStart >= 0) throw new IOException($"config.toml has duplicate {key} keys; file was not changed.");
                     foundStart = i + match.Length;
                     if (foundStart >= text.Length || text[foundStart] is not ('\'' or '"'))
-                        throw new IOException("Credential store value in config.toml is not a string; file was not changed.");
+                        throw new IOException($"{key} value in config.toml is not a string; file was not changed.");
                     foundEnd = SkipString(text, foundStart);
                     i = foundEnd; lineStart = false; continue;
                 }
@@ -38,10 +41,10 @@ public static class CredentialConfig
             if (c is ']' or '}') depth--;
             i++;
         }
-        if (foundStart >= 0) return text[..foundStart] + "\"file\"" + text[foundEnd..];
+        if (foundStart >= 0) return text[..foundStart] + literal + text[foundEnd..];
         var ending = text.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
         var prefix = text.StartsWith('\uFEFF') ? "\uFEFF" : "";
-        return prefix + "cli_auth_credentials_store = \"file\"" + ending + text[prefix.Length..];
+        return prefix + key + " = " + literal + ending + text[prefix.Length..];
     }
 
     private static int SkipString(string text, int start)
@@ -63,13 +66,15 @@ public static class CredentialConfig
         throw new IOException("config.toml contains an unterminated string; file was not changed.");
     }
 
-    public static void EnsureFile(string profile)
+    public static void EnsureFile(string profile) => Update(profile, UseFile);
+
+    public static void Update(string profile, Func<string, string> transform)
     {
         PathSafety.OrdinaryDirectory(profile);
         var path = Path.Combine(profile, "config.toml"); PathSafety.NoReparseAncestors(path);
         var exists = File.Exists(path);
         var original = exists ? File.ReadAllText(path) : "";
-        var updated = UseFile(original);
+        var updated = transform(original);
         if (original == updated) return;
         using var pin = JunctionService.PinDirectory(profile, allowWrites: true);
         var temporary = Path.Combine(profile, ".credential-config-" + Guid.NewGuid().ToString("N") + ".tmp");

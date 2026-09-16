@@ -24,10 +24,15 @@ Authentication is separate unless the user explicitly copies the default login d
 The CLI receives a profile-specific `CODEX_HOME` and a file credential override. Known inherited
 credential and remote-attachment environment variables are removed from the child process.
 
-Only `sessions` is shared through an NTFS directory junction. Database/index/history state is
-not shared; identical session files do not guarantee identical resume pickers across clients.
+`sessions` and `archived_sessions` are shared through NTFS directory junctions. Before each
+launch, `sqlite_home` is set to the default Codex home in the profile config and CLI override.
+Current Codex metadata, names, recency and paginated history therefore use the same SQLite
+databases as Desktop across all windows. Other SQLite stores under this root are shared too.
+Authentication, config, input history and the legacy JSONL name index remain profile-local.
+Existing private SQLite files are preserved; the explicit maintenance script imports CLI-only
+threads and their history without overwriting Desktop records. No whole-home linking or copying.
 Deletion verifies paths, junction tag and target, rejects unexpected reparse points, detaches
-the link without recursion and deletes only the private tree. It never recursively traverses
+both links without recursion and deletes only the private tree. It never recursively traverses
 the shared sessions directory.
 
 ## User operations

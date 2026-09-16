@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.9.0 — 2026-09-16
+
+- Share Desktop SQLite session metadata and paginated history across every account window while keeping file credentials private. Apply the setting to existing profiles before launch and pass an explicit CLI override.
+- Share archived sessions too; account deletion validates and detaches both junctions without traversing shared data.
+- Normalize Windows device prefixes and existing WSL drive mounts in project discovery. Label junction status accurately as session-file linking.
+- Add an explicit dry-run maintenance script for importing CLI-only history and repairing nonexistent `C:\mnt\<drive>` working directories with verified Windows destinations. Preserve original databases and conversation files.
+
 ## 1.8.0 — 2026-09-12
 
 - Add a per-card Warm up button: send `reply "OK"` with `codex exec --ephemeral` in the background without saving session files.

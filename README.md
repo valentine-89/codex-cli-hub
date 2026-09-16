@@ -92,6 +92,7 @@ CodexAccountManager/
     auth.json          # CLI tạo sau login hoặc sao chép khi người dùng chọn
     ...private state...
     sessions -> <Default Codex Home>/sessions
+    archived_sessions -> <Default Codex Home>/archived_sessions
 ```
 
 App dùng thư mục executable, không phụ thuộc current working directory. Không lưu password,
@@ -117,15 +118,28 @@ Codex CLI tự quản lý log/state của nó trong profile; các file đó cũn
 
 ## Shared sessions: phạm vi thực tế
 
-Chỉ `profiles/<GUID>/sessions` là **NTFS Directory Junction** trỏ tới thư mục sessions có sẵn.
-App không tự tạo/sửa thư mục Codex Home mặc định. Auth, config, history.jsonl, database/index
-và các state khác vẫn riêng. Sharing session files **không đảm bảo** resume picker/index của App
-và từng CLI giống nhau, đặc biệt khi CLI dùng định dạng hoặc cơ chế migration mới.
-Resume `--all` bỏ lọc working directory nhưng không đồng bộ database riêng.
+Từ 1.9.0, `sessions` và `archived_sessions` dùng **NTFS Directory Junction** tới Codex Home mặc định.
+Trước mỗi lần mở, manager ghi `sqlite_home` trỏ tới Codex Home mặc định vào config của profile,
+đồng thời truyền override cho CLI. Metadata phiên, tên, thời gian cập nhật và lịch sử phân trang
+dùng chung với Desktop và các cửa sổ CLI. Các SQLite database khác do Codex đặt dưới `sqlite_home`
+(ví dụ goals, queue, memories, logs) cũng dùng chung; auth và config vẫn riêng từng tài khoản.
+Đã kiểm tra với CLI 0.154.0 và Desktop 0.154.0-alpha.6.2. Cấu hình này dùng database mặc định
+nằm trực tiếp trong Default Codex Home; không cấu hình Desktop với một `sqlite_home` khác.
+`session_index.jsonl` cũ và `history.jsonl` vẫn riêng; picker hiện tại đọc tên từ database chung.
+`/resume` lọc theo thư mục; nút Resume chạy `--all` để xem mọi thư mục.
+Sau khi nâng cấp, mở lại các cửa sổ CLI cũ để nhận cấu hình mới.
+
+Profile cũ được chuẩn bị trước lần mở tiếp theo. Nếu `archived_sessions` đang là thư mục riêng
+hoặc link sai đích, manager dừng và giữ dữ liệu để xử lý thay vì thay thế.
+Các database riêng cũ được giữ nguyên. Khi cần nhập phiên chỉ tồn tại trong CLI cũ, chạy
+`scripts/repair-session-store.py --home <Default Codex Home> --profiles <portable>/profiles`
+để xem kế hoạch; thêm `--apply` để nhập metadata/lịch sử mà không ghi đè phiên Desktop.
+Script cũng sửa `C:\mnt\<drive>\...` khi đường dẫn đó không tồn tại và thư mục ổ đĩa thật tồn tại.
+Đây là công cụ bảo trì Python chạy thủ công, không phải dependency của ứng dụng.
 
 Junction là link đọc/ghi: lệnh Codex sửa/xóa session có thể tác động đến session được chia sẻ.
 Cam kết bảo toàn bên dưới áp dụng cho chức năng **Delete account** của manager.
-Không junction toàn bộ `.codex` và không tự mở rộng phần được chia sẻ để sửa vấn đề resume.
+Không junction toàn bộ `.codex`. Delete account tháo cả hai junction trước khi xóa dữ liệu riêng.
 
 Junction dùng target tuyệt đối. Chuyển thư mục trên cùng máy giữ target; chuyển sang máy khác
 cần target tương ứng. Không tự đổi target của profile có sẵn. Muốn thay Default Codex Home,
