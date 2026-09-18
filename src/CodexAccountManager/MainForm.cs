@@ -14,7 +14,7 @@ public sealed class MainForm : Form
     private readonly AccountDocument accounts;
     private AppSettings settings;
     private Dependencies dependencies = new(null, null, false);
-    private readonly FlowLayoutPanel cards = new() { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(22, 4, 8, 8) };
+    private readonly FlowLayoutPanel cards = new() { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(Theme.Scale(22), Theme.Scale(4), Theme.Scale(8), Theme.Scale(8)) };
     private readonly Label status = Theme.Label("Checking…");
     private readonly Label count = Theme.Label("");
     private readonly Panel header = new() { Dock = DockStyle.Fill };
@@ -35,20 +35,48 @@ public sealed class MainForm : Form
         if (!File.Exists(Path.Combine(repository.Root, "settings.json"))) repository.SaveSettings(settings);
         logger.Write("startup", repository.Root);
         Text = "Codex Account Manager"; Icon = Theme.Icon; Font = new Font("Segoe UI", 9.5f);
-        BackColor = Theme.Background; ForeColor = Theme.Ink; ClientSize = new Size(940, 565); MinimumSize = new Size(620, 420);
+        BackColor = Theme.Background; ForeColor = Theme.Ink;
+        ClientSize = Theme.Scale(new Size(940, 565));
+        MinimumSize = Theme.Scale(new Size(620, 420));
         StartPosition = FormStartPosition.CenterScreen; AutoScaleMode = AutoScaleMode.Dpi; DoubleBuffered = true;
+
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 3, ColumnCount = 1 };
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 88)); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
-        var logo = new PictureBox { Image = Theme.Logo, SizeMode = PictureBoxSizeMode.Zoom, Location = new Point(24, 22), Size = new Size(44, 44) };
-        var title = Theme.Label("Codex Accounts", true); title.Dock = DockStyle.None; title.Location = new Point(80, 21); title.Size = new Size(235, 27); title.Font = new Font("Segoe UI", 16, FontStyle.Bold);
-        count.Dock = DockStyle.None; count.Location = new Point(82, 50); count.Size = new Size(235, 24);
-        var topActions = new FlowLayoutPanel { Anchor = AnchorStyles.Top | AnchorStyles.Right, Size = new Size(294, 38), Location = new Point(ClientSize.Width - 316, 29), WrapContents = false };
-        topActions.Controls.Add(ActionButton("+ Add account", AddAccount, true, 155));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, Theme.Scale(88)));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, Theme.Scale(34)));
+
+        // Header uses a TableLayoutPanel instead of absolute positioning for DPI scaling
+        var headerLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 2, Margin = Padding.Empty, Padding = Padding.Empty };
+        headerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, Theme.Scale(72)));   // logo column
+        headerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));                 // title/count column (fill)
+        headerLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));                     // action buttons column
+        headerLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        headerLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+
+        var logo = new PictureBox { Image = Theme.Logo, SizeMode = PictureBoxSizeMode.Zoom, Dock = DockStyle.Fill, Margin = new Padding(Theme.Scale(24), Theme.Scale(12), 0, Theme.Scale(8)) };
+        headerLayout.Controls.Add(logo, 0, 0);
+        headerLayout.SetRowSpan(logo, 2);
+
+        var title = Theme.Label("Codex Accounts", true);
+        title.Dock = DockStyle.Fill; title.AutoSize = false;
+        title.Font = new Font("Segoe UI", 16, FontStyle.Bold);
+        title.TextAlign = ContentAlignment.BottomLeft;
+        title.Margin = new Padding(Theme.Scale(8), 0, 0, 0);
+        headerLayout.Controls.Add(title, 1, 0);
+
+        count.Dock = DockStyle.Fill; count.AutoSize = false;
+        count.TextAlign = ContentAlignment.TopLeft;
+        count.Margin = new Padding(Theme.Scale(8), 0, 0, 0);
+        headerLayout.Controls.Add(count, 1, 1);
+
+        var topActions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Anchor = AnchorStyles.Right, AutoSize = true, FlowDirection = FlowDirection.RightToLeft, Margin = new Padding(0, Theme.Scale(20), Theme.Scale(16), 0) };
         topActions.Controls.Add(ActionButton("Settings", SettingsDialog, false, 100));
-        header.Width = ClientSize.Width;
-        header.Controls.AddRange([logo, title, count, topActions]);
-        status.Padding = new Padding(24, 0, 0, 0);
+        topActions.Controls.Add(ActionButton("+ Add account", AddAccount, true, 155));
+        headerLayout.Controls.Add(topActions, 2, 0);
+        headerLayout.SetRowSpan(topActions, 2);
+
+        header.Controls.Add(headerLayout);
+        status.Padding = new Padding(Theme.Scale(24), 0, 0, 0);
         layout.Controls.Add(header, 0, 0); layout.Controls.Add(cards, 0, 1); layout.Controls.Add(status, 0, 2);
         Controls.Add(layout);
         cards.Resize += (_, _) => ResizeCards(); RenderAccounts();
@@ -90,8 +118,8 @@ public sealed class MainForm : Form
     private void ResizeCards()
     {
         var available = cards.ClientSize.Width - cards.Padding.Horizontal - SystemInformation.VerticalScrollBarWidth;
-        var columns = available >= 790 ? 2 : 1;
-        foreach (Control card in cards.Controls) card.Width = Math.Max(320, available / columns - 14);
+        var columns = available >= Theme.Scale(790) ? 2 : 1;
+        foreach (Control card in cards.Controls) card.Width = Math.Max(Theme.Scale(320), available / columns - Theme.Scale(14));
     }
     private void RenderAccounts()
     {
@@ -100,7 +128,7 @@ public sealed class MainForm : Form
         count.Text = accounts.Accounts.Count == 1 ? "1 account" : $"{accounts.Accounts.Count} accounts";
         if (accounts.Accounts.Count == 0)
         {
-            var empty = new AccountCard { Height = 145 };
+            var empty = new AccountCard { Height = Theme.Scale(145) };
             var label = Theme.Label("Add your first account", true); label.TextAlign = ContentAlignment.MiddleCenter;
             empty.Controls.Add(label); cards.Controls.Add(empty);
         }
@@ -112,17 +140,17 @@ public sealed class MainForm : Form
     {
         var quotaLines = account.Quota?.Lines ?? [];
         var golden = QuotaPresentation.WeeklyOnly(account.Quota); var low = QuotaPresentation.Low(account.Quota);
-        var card = new AccountCard { Height = 140 + quotaRows * 22,
+        var card = new AccountCard { Height = Theme.Scale(140) + quotaRows * Theme.Scale(22),
             BackColor = golden ? (low ? Color.FromArgb(250, 244, 221) : Color.FromArgb(245, 218, 140))
                 : low ? Color.FromArgb(225, 228, 231) : Color.White };
         card.Enabled = refreshQueue.ActiveAccountId != account.Id && !warming.Contains(account.Id);
         var body = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Margin = Padding.Empty };
-        foreach (var height in new[] { 26, 23, quotaRows * 22, 25, 37 }) body.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+        foreach (var height in new[] { 26, 23, quotaRows * 22, 25, 37 }) body.RowStyles.Add(new RowStyle(SizeType.Absolute, Theme.Scale(height)));
         TableLayoutPanel Columns(Control left, Control right, int rightWidth)
         {
             var columns = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty, Padding = Padding.Empty };
             columns.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            columns.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, rightWidth));
+            columns.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, Theme.Scale(rightWidth)));
             columns.Controls.Add(left, 0, 0); columns.Controls.Add(right, 1, 0);
             if (right is Label label) label.TextAlign = ContentAlignment.MiddleRight;
             return columns;
@@ -146,7 +174,7 @@ public sealed class MainForm : Form
         var row = 0;
         void AddQuota(string text, Color color)
         {
-            quotaPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
+            quotaPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, Theme.Scale(22)));
             var label = Theme.Label(text); label.ForeColor = color; tips.SetToolTip(label, text);
             quotaPanel.Controls.Add(label, 0, row++);
         }

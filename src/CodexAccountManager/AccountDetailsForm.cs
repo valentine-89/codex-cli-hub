@@ -17,7 +17,7 @@ public sealed class AccountDetailsForm : Form
         void Row(Control control, int height)
         {
             var row = layout.RowCount++;
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, Theme.Scale(height)));
             layout.Controls.Add(control, 0, row);
         }
         Row(Theme.Label("Account name"), 25); Row(name, 36);

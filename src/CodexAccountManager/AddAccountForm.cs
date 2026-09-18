@@ -12,7 +12,7 @@ public sealed class AddAccountForm : Form
     {
         Theme.SetupDialog(this, "Add account", new Size(440, 305));
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(22, 14, 22, 14), ColumnCount = 1, RowCount = 7 };
-        foreach (var height in new[] { 25, 36, 25, 37, 34, 42, 42 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+        foreach (var height in new[] { 25, 36, 25, 37, 34, 42, 42 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, Theme.Scale(height)));
         layout.Controls.Add(Theme.Label("Account name"), 0, 0); layout.Controls.Add(name, 0, 1);
         layout.Controls.Add(Theme.Label("Note"), 0, 2); layout.Controls.Add(note, 0, 3);
         layout.Controls.Add(new RadioButton { Text = "New login", Checked = true, AutoSize = true }, 0, 4);

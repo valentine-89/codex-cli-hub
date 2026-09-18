@@ -8,17 +8,36 @@ internal static class Theme
     public static readonly Color Accent = Color.FromArgb(19, 118, 105);
     public static Icon Icon => new(typeof(Theme).Assembly.GetManifestResourceStream("CodexAccountManager.app.ico")!);
     public static Image Logo => Image.FromStream(typeof(Theme).Assembly.GetManifestResourceStream("CodexAccountManager.logo.png")!);
+
+    /// <summary>Returns the DPI scale factor relative to 96 DPI (1.0 at 100%, 1.25 at 125%, 1.5 at 150%, 2.0 at 200%).</summary>
+    public static float DpiScale
+    {
+        get
+        {
+            using var screen = Graphics.FromHwnd(IntPtr.Zero);
+            return screen.DpiX / 96f;
+        }
+    }
+
+    /// <summary>Scale a pixel value by the current DPI factor.</summary>
+    public static int Scale(int pixels) => (int)Math.Round(pixels * DpiScale);
+
+    /// <summary>Scale a Size by the current DPI factor.</summary>
+    public static Size Scale(Size size) => new(Scale(size.Width), Scale(size.Height));
+
     public static Button Button(string text, bool primary = false, int width = 100)
     {
-        var button = new Button { Text = text, Width = width, Height = 34, FlatStyle = FlatStyle.Flat,
+        var w = Scale(width);
+        var h = Scale(34);
+        var button = new Button { Text = text, Width = w, Height = h, FlatStyle = FlatStyle.Flat,
             BackColor = primary ? Ink : Color.White, ForeColor = primary ? Color.White : Ink,
-            Cursor = Cursors.Hand, Font = new Font("Segoe UI", 9.5f), Margin = new Padding(0, 0, 8, 0) };
+            Cursor = Cursors.Hand, Font = new Font("Segoe UI", 9.5f), Margin = new Padding(0, 0, Scale(8), 0) };
         button.FlatAppearance.BorderColor = primary ? Ink : Color.FromArgb(219, 228, 232);
         return button;
     }
     public static void SetupDialog(Form form, string title, Size size)
     {
-        form.Text = title; form.ClientSize = size; form.Font = new Font("Segoe UI", 10);
+        form.Text = title; form.ClientSize = Scale(size); form.Font = new Font("Segoe UI", 10);
         form.BackColor = Background; form.ForeColor = Ink; form.Icon = Icon;
         form.FormBorderStyle = FormBorderStyle.FixedDialog; form.MaximizeBox = false; form.MinimizeBox = false;
         form.StartPosition = FormStartPosition.CenterParent; form.ShowInTaskbar = false;
@@ -32,7 +51,7 @@ internal static class Theme
 }
 internal sealed class AccountCard : Panel
 {
-    public AccountCard() { DoubleBuffered = true; BackColor = Color.White; Padding = new Padding(14, 8, 14, 8); Margin = new Padding(0, 0, 14, 10); }
+    public AccountCard() { DoubleBuffered = true; BackColor = Color.White; Padding = new Padding(Theme.Scale(14), Theme.Scale(8), Theme.Scale(14), Theme.Scale(8)); Margin = new Padding(0, 0, Theme.Scale(14), Theme.Scale(10)); }
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);

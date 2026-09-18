@@ -13,7 +13,7 @@ public sealed class AdvancedSettingsForm : Form
         Theme.SetupDialog(this, "Advanced settings", new Size(580, 340));
         home.Text = settings.DefaultCodexHome; workingDirectory.Text = settings.WorkingDirectory;
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(22, 14, 22, 14), ColumnCount = 1, RowCount = 9 };
-        foreach (var height in new[] { 25, 36, 25, 40, 30, 30, 33, 18, 42 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+        foreach (var height in new[] { 25, 36, 25, 40, 30, 30, 33, 18, 42 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, Theme.Scale(height)));
         layout.Controls.Add(Theme.Label("Default Codex Home"), 0, 0); layout.Controls.Add(home, 0, 1);
         layout.Controls.Add(Theme.Label("Working directory"), 0, 2); layout.Controls.Add(workingDirectory, 0, 3);
         layout.Controls.Add(new TextBox { Text = "Codex: " + (dependencies.Codex ?? "Not found"), ReadOnly = true, BorderStyle = BorderStyle.None, Dock = DockStyle.Fill, BackColor = Theme.Background }, 0, 4);

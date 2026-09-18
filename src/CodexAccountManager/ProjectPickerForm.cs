@@ -19,8 +19,8 @@ public sealed class ProjectPickerForm : Form
         this.sessionsDirectory = sessionsDirectory;
         Theme.SetupDialog(this, "Open project · " + accountName, new Size(660, 410));
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(22, 16, 22, 16), ColumnCount = 1, RowCount = 4 };
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38)); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32)); layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, Theme.Scale(38))); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, Theme.Scale(32))); layout.RowStyles.Add(new RowStyle(SizeType.Absolute, Theme.Scale(38)));
         var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, WrapContents = false };
         var cancel = Theme.Button("Cancel"); cancel.DialogResult = DialogResult.Cancel;
         var browse = Theme.Button("Browse…", width: 140);

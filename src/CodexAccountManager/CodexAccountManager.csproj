@@ -6,6 +6,7 @@
     <Version>1.9.0</Version>
     <ApplicationIcon>../../assets/app.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
   </PropertyGroup>
   <ItemGroup><ProjectReference Include="../CodexAccountManager.Core/CodexAccountManager.Core.csproj" /></ItemGroup>
   <ItemGroup>
