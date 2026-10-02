@@ -1,5 +1,41 @@
 # Changelog
 
+## 1.11.0 — 2026-10-03
+
+- Add 15 stdio MCP tools and a current-user named pipe; auto-start a headless Manager when the GUI is closed. No desktop input or unlock required.
+- Persist Manager terminal identities and add independent Codex CLI app-server workers for resume, prompts, steering, explicit approvals, interruption and stop.
+- Transfer existing terminals explicitly or switch accounts for the same stored thread after quota/exclusion checks. Preserve saved model, reasoning effort and permission policy; refuse duplicate owners.
+- Keep notes/auth outside MCP results. No reset-credit, deletion, login or global-auth replacement tools.
+
+## 1.10.4 — 2026-10-01
+
+- Keep account cards and action buttons in place during manual/automatic Refresh and Warm up. Update content without replacing cards or changing their outer heights.
+- Prevent focus-driven scrolling while disabling a busy card and during mouse clicks; retain keyboard navigation and scrolling while requests run.
+- Show extra quota/error rows in a scrollable quota area so new results do not move other accounts.
+
+## 1.10.3 — 2026-09-27
+
+- Fix the Codex interactive terminal warning when the manager inherits `TERM=dumb` from its parent. Set `xterm-256color` inside newly opened CLI/login/resume consoles, preserving other terminal settings and the parent environment.
+
+## 1.10.2 — 2026-09-27
+
+- Fix new projectless chats using manager-only folders that Desktop did not recognize. Use Desktop's dated Documents/Codex layout with collision-safe names, work and outputs directories.
+- Match Desktop's cwd classification for CLI-created projectless chats without changing its live global state. Preserve explicit project assignments and existing chat workspaces.
+- Add an offline repair for 1.10.0/1.10.1 projectless chat membership with backup and Desktop-running checks; preserve working files, cwd and conversation history.
+
+## 1.10.1 — 2026-09-27
+
+- Manual Refresh locks only its account card. Other accounts can refresh concurrently, and the account list remains scrollable.
+- Manual/automatic refresh and Warm up update only the affected card, preserving other controls and the scroll position. Card heights remain aligned when quota rows change.
+- Prevent overlapping operations on the same account, cancel refresh subprocesses on close, and retain cached quota on failure without blocking the UI with a dialog.
+
+## 1.10.0 — 2026-09-27
+
+- Discover current CLI/Desktop sessions through paginated app-server `thread/list` and merge Desktop workspace roots. Keep a visible legacy JSONL fallback for older/unavailable APIs.
+- Split Open CLI into Projects and Chats without project, with title search, refresh, new chat and exact-session resume. Projectless chats no longer appear as project folders.
+- Support UNC/WSL shares, normalize WSL host aliases and repair historical mount paths only when the real destination exists. Browse can resume a missing-folder session in its new location.
+- Start projectless chats in separate persistent workspaces; resume existing projectless chats even when their former workspace is gone. Preserve account isolation and shared session data.
+
 ## 1.9.0 — 2026-09-16
 
 - Share Desktop SQLite session metadata and paginated history across every account window while keeping file credentials private. Apply the setting to existing profiles before launch and pass an explicit CLI override.

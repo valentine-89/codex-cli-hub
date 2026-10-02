@@ -1,9 +1,11 @@
 **/bin/
 **/obj/
+**/__pycache__/
 dist/
 artifacts/
 **/profiles/
 **/logs/
+**/runtime/sessions/
 **/accounts.json
 **/settings.json
 **/auth.json

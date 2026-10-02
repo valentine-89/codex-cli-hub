@@ -1,4 +1,5 @@
 using CodexAccountManager.Core;
+using System.Text.Json;
 
 if (args.Contains("exec"))
 {
@@ -16,11 +17,54 @@ if (args.Contains("app-server"))
         using var request = System.Text.Json.JsonDocument.Parse(line);
         var json = request.RootElement;
         if (!json.TryGetProperty("id", out var id)) continue;
+        if (json.TryGetProperty("result", out _))
+        {
+            Console.WriteLine("{\"method\":\"serverRequest/resolved\",\"params\":{\"requestId\":\"approval-1\"}}");
+            continue;
+        }
         var method = json.GetProperty("method").GetString();
         if (method == "account/rateLimitResetCredit/consume")
         {
             var key = json.GetProperty("params").GetProperty("idempotencyKey").GetString();
             Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { id = id.GetInt32(), result = new { outcome = key == "00000000-0000-0000-0000-000000000001" ? "alreadyRedeemed" : "noCredit" } }));
+        }
+        else if (method == "thread/list")
+        {
+            var parameters = json.GetProperty("params");
+            if (!parameters.GetProperty("useStateDbOnly").GetBoolean() || parameters.GetProperty("archived").GetBoolean()
+                || parameters.GetProperty("modelProviders").GetArrayLength() != 0
+                || !args.Any(a => a.StartsWith("sqlite_home=")) || string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CODEX_SQLITE_HOME"))) return 43;
+            var profileHome = Environment.GetEnvironmentVariable("CODEX_HOME")!;
+            var modeFile = Path.Combine(profileHome, "catalog-mode.txt");
+            var mode = File.Exists(modeFile) ? File.ReadAllText(modeFile) : "";
+            if (mode == "error") { Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { id = id.GetInt32(), error = new { code = -32601 } })); continue; }
+            if (mode == "cancel") { await Task.Delay(10000); continue; }
+            var second = parameters.GetProperty("cursor").ValueKind == System.Text.Json.JsonValueKind.String;
+            var data = second ? new object[] {
+                new { id = "00000000-0000-0000-0000-000000000001", cwd = profileHome, name = "Project chat", updatedAt = 100 },
+                new { id = "00000000-0000-0000-0000-000000000002", cwd = (string?)null, name = "Chat without folder", updatedAt = 200 }
+            } : new object[] { new { id = "00000000-0000-0000-0000-000000000001", cwd = profileHome, name = "Project chat", updatedAt = 100 } };
+            Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { id = id.GetInt32(), result = new { data, nextCursor = second && mode != "repeat" ? null : "page-2" } }));
+        }
+        else if (method is "thread/start" or "thread/resume")
+        {
+            var parameters = json.GetProperty("params");
+            if (parameters.TryGetProperty("sandbox", out var sandbox) && sandbox.GetString() is not ("danger-full-access" or "read-only" or "workspace-write")) return 45;
+            var threadId = parameters.TryGetProperty("threadId", out var tid) ? tid.GetString() : "00000000-0000-0000-0000-000000000003";
+            Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { id = id.GetInt32(), result = new { thread = new { id = threadId } } }));
+        }
+        else if (method == "turn/start")
+        {
+            var text = json.GetProperty("params").GetProperty("input")[0].GetProperty("text").GetString();
+            Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { id = id.GetInt32(), result = new { turn = new { id = "turn-test", status = "inProgress" } } }));
+            Console.WriteLine("{\"method\":\"turn/started\",\"params\":{\"turn\":{\"id\":\"turn-test\"}}}");
+            if (text == "approval") Console.WriteLine("{\"id\":\"approval-1\",\"method\":\"item/commandExecution/requestApproval\",\"params\":{\"threadId\":\"00000000-0000-0000-0000-000000000003\",\"turnId\":\"turn-test\",\"command\":\"echo fixture\"}}");
+        }
+        else if (method == "turn/steer") Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { id = id.GetInt32(), result = new { turnId = "turn-test" } }));
+        else if (method == "turn/interrupt")
+        {
+            Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { id = id.GetInt32(), result = new { } }));
+            Console.WriteLine("{\"method\":\"turn/completed\",\"params\":{\"turn\":{\"id\":\"turn-test\",\"status\":\"interrupted\"}}}");
         }
         else Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { id = id.GetInt32(), result = new { } }));
     }
@@ -55,6 +99,16 @@ if (args.Length == 2 && args[0] == "--catalog")
     var result = new SessionProjectCatalog().Read(args[1]);
     Console.WriteLine($"Projects: {result.Projects.Count}; skipped entries: {result.SkippedFiles}");
     foreach (var project in result.Projects.Take(8)) Console.WriteLine($"{project.Directory} (sessions={project.SessionCount}, exists={project.Exists})");
+    return 0;
+}
+
+if (args.Length == 3 && args[0] == "--workspace-catalog")
+{
+    var deps = await DependencyDetector.DetectAsync();
+    var timer = System.Diagnostics.Stopwatch.StartNew();
+    var result = await new WorkspaceCatalogService().ReadAsync(deps, args[2], args[1]);
+    Console.WriteLine($"Projects: {result.Projects.Count}; sessions: {result.Sessions.Count}; projectless: {result.Sessions.Count(s => s.IsProjectless)}; warning: {result.Warning ?? "none"}; elapsed: {timer.ElapsedMilliseconds} ms");
+    foreach (var project in result.Projects) Console.WriteLine($"{project.Directory} (sessions={project.SessionCount}, exists={project.Exists})");
     return 0;
 }
 
@@ -355,7 +409,12 @@ Test("catalog normalizes device paths and existing WSL drive mounts only", () =>
     var mount = "/mnt/" + char.ToLowerInvariant(f.App[0]) + f.App[2..].Replace('\\', '/');
     Assert(PathSafety.Same(SessionProjectCatalog.NormalizeWorkingDirectory(mount), f.App), "Existing WSL mount not mapped");
     Reject(() => SessionProjectCatalog.NormalizeWorkingDirectory(mount + "/missing"));
-    Reject(() => SessionProjectCatalog.NormalizeWorkingDirectory(@"\\?\UNC\server\share"));
+    Assert(SessionProjectCatalog.NormalizeWorkingDirectory(@"\\?\UNC\server\share") == @"\\server\share", "UNC device prefix not normalized");
+    Assert(SessionProjectCatalog.NormalizeWorkingDirectory(@"\\?\UNC\wsl$\Ubuntu\home\user\project") == @"\\wsl.localhost\Ubuntu\home\user\project", "WSL share not normalized");
+    var broken = @"C:\mnt\" + char.ToLowerInvariant(f.App[0]) + f.App[2..];
+    Assert(PathSafety.Same(SessionProjectCatalog.NormalizeWorkingDirectory(broken), f.App), "Historical Windows mount not repaired");
+    Reject(() => SessionProjectCatalog.NormalizeWorkingDirectory(@"\\.\pipe\invalid"));
+    Reject(() => SessionProjectCatalog.NormalizeWorkingDirectory(@"\\server\share\..\other"));
 });
 Test("session catalog skips nested links and supports large metadata headers", () =>
 {
@@ -370,6 +429,103 @@ Test("session catalog skips nested links and supports large metadata headers", (
     try { new SessionProjectCatalog().Read(f.Shared, canceled.Token); throw new Exception("Cancellation ignored"); }
     catch (OperationCanceledException) { }
 });
+Test("workspace catalog separates explicit projectless chats and keeps missing projects", () =>
+{
+    var f = Fixture();
+    var noProject = Guid.NewGuid().ToString(); var reassigned = Guid.NewGuid().ToString(); var canonical = Guid.NewGuid().ToString();
+    var projectlessDirectory = Path.Combine(f.Root, "chat-files"); Directory.CreateDirectory(projectlessDirectory);
+    var missing = Path.Combine(f.Root, "missing-project");
+    var state = Path.Combine(f.Settings.DefaultCodexHome, ".codex-global-state.json");
+    File.WriteAllText(state, System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object> {
+        ["projectless-thread-ids"] = new[] { noProject, reassigned, canonical },
+        ["thread-project-assignments"] = new Dictionary<string, object> { [reassigned] = new { projectId = "assigned-project" } },
+        ["local-projects"] = new { saved = new { rootPaths = new[] { f.App } } }
+    }));
+    var before = File.ReadAllText(state);
+    var result = WorkspaceCatalogService.Build(f.Settings.DefaultCodexHome, [
+        new(noProject, "No project", projectlessDirectory, DateTime.UtcNow),
+        new(reassigned, "Assigned again", f.App, DateTime.UtcNow),
+        new(canonical, "Server assignment wins", f.App, DateTime.UtcNow, "server-project"),
+        new(Guid.NewGuid().ToString(), "Missing project", missing, DateTime.UtcNow),
+        new(Guid.NewGuid().ToString(), "No cwd", null, DateTime.UtcNow),
+        new(Guid.NewGuid().ToString(), "Manager chat", Path.Combine(WorkspaceCatalogService.ChatRoot(f.Settings.DefaultCodexHome), "one"), DateTime.UtcNow)
+    ]);
+    Assert(result.Sessions.Count(s => s.IsProjectless) == 3, "Incorrect projectless classification");
+    Assert(result.Projects.Count == 2 && result.Projects[0].SessionCount == 2, "Folderless chat polluted project list");
+    Assert(result.Projects.Any(p => p.Directory == missing && !p.Exists), "Missing project became a folderless chat");
+    Assert(File.ReadAllText(state) == before, "Desktop state changed during discovery");
+});
+Test("workspace metadata failures preserve current sessions and legacy headers allow late cwd", () =>
+{
+    var f = Fixture();
+    File.WriteAllText(Path.Combine(f.Settings.DefaultCodexHome, ".codex-global-state.json"), "{broken");
+    var result = WorkspaceCatalogService.Build(f.Settings.DefaultCodexHome, [new(Guid.NewGuid().ToString(), "Current", f.App, DateTime.UtcNow)]);
+    Assert(result.Projects.Count == 1 && result.Warning is not null, "Bad Desktop state lost current sessions");
+    var id = Guid.NewGuid().ToString();
+    File.WriteAllText(Path.Combine(f.Shared, "late-cwd.jsonl"), System.Text.Json.JsonSerializer.Serialize(new {
+        payload = new { base_instructions = new string('x', 300000), cwd = f.App, id }, type = "session_meta"
+    }) + "\n{invalid conversation ignored");
+    var legacy = new SessionProjectCatalog().Read(f.Shared);
+    Assert(legacy.Projects.Count == 1 && legacy.Sessions.Single().Id == id, "Late metadata after 128 KiB lost");
+});
+Test("projectless launch uses Desktop layout and preserves existing chat files", () =>
+{
+    var f = Fixture(); var id = Guid.NewGuid().ToString();
+    var saved = WorkspaceCatalogService.ResolveDirectory(new(f.App, id, true), f.Settings.DefaultCodexHome);
+    Assert(saved == f.App, "Existing chat workspace changed");
+    var selection = new CliSelection(Path.Combine(f.Root, "missing"), id, true);
+    var path = WorkspaceCatalogService.ResolveDirectory(selection, f.Settings.DefaultCodexHome, f.Root);
+    Assert(Directory.Exists(path) && PathSafety.Within(path, DesktopChatWorkspace.Root(f.Root)), "Chat did not use Desktop's Documents/Codex root");
+    Assert(Directory.Exists(Path.Combine(path, "work")) && Directory.Exists(Path.Combine(path, "outputs")), "Desktop split folders missing");
+    Assert(WorkspaceCatalogService.ResolveDirectory(selection with { Directory = path }, f.Settings.DefaultCodexHome, f.Root) == path, "Resume workspace changed");
+    var fresh = WorkspaceCatalogService.ResolveDirectory(new(null, IsProjectless: true), f.Settings.DefaultCodexHome, f.Root);
+    Assert(fresh != path, "New chat reused an old workspace");
+    Reject(() => WorkspaceCatalogService.ResolveDirectory(selection with { IsProjectless = false }, f.Settings.DefaultCodexHome));
+});
+Test("Desktop identifies CLI chats by cwd without global-state mutation", () =>
+{
+    var f = Fixture();
+    var root = DesktopChatWorkspace.Root(f.Root);
+    var path = DesktopChatWorkspace.Create(f.Root, new DateTime(2026, 9, 27));
+    Assert(path == Path.Combine(root, "2026-09-27", "new-chat"), "Unexpected Desktop folder format");
+    File.WriteAllText(Path.Combine(path, "keep.txt"), "keep");
+    var other = DesktopChatWorkspace.Create(f.Root, new DateTime(2026, 9, 27));
+    Assert(other.EndsWith("new-chat-2") && File.ReadAllText(Path.Combine(path, "keep.txt")) == "keep", "Existing chat folder reused");
+    var paths = new[] { path, @"\\?\" + path, Path.Combine(root, "2026-09-26-old-chat"), Path.Combine(root, "ordinary-project") };
+    var result = WorkspaceCatalogService.Build(f.Settings.DefaultCodexHome, paths.Select(p =>
+        new CatalogSession(Guid.NewGuid().ToString(), "Chat", p, DateTime.UtcNow)).ToArray());
+    Assert(result.Sessions.Count(s => s.IsProjectless) == 3 && result.Projects.Count == 1, "Desktop path classifier differs");
+    Assert(!File.Exists(Path.Combine(f.Settings.DefaultCodexHome, ".codex-global-state.json")), "Discovery modified Desktop state");
+    Assert(DesktopChatWorkspace.RecognizedRoot(Path.Combine(path, "outputs")) is null, "Nested project mistaken for chat root");
+    var linkedHome = Path.Combine(f.Root, "linked-home"); Directory.CreateDirectory(linkedHome);
+    f.Junctions.Create(Path.Combine(linkedHome, "Documents"), f.App);
+    Reject(() => DesktopChatWorkspace.Create(linkedHome));
+});
+tests.Add(("current thread discovery paginates, deduplicates and uses shared state", async () =>
+{
+    var f = Fixture();
+    var deps = new Dependencies(null, null, false, Environment.ProcessPath!);
+    var result = await new WorkspaceCatalogService().ReadAsync(deps, f.App, f.Settings.DefaultCodexHome);
+    Assert(result.Warning is null && result.Sessions.Count == 2 && result.Projects.Single().Directory == f.App, "Current session discovery failed");
+    Assert(result.Sessions.Count(s => s.IsProjectless) == 1, "No-cwd session lost");
+    File.WriteAllText(Path.Combine(f.App, "catalog-mode.txt"), "repeat");
+    try { await new CodexThreadReader().ReadAsync(deps, f.App, f.Settings.DefaultCodexHome); throw new Exception("Repeated cursor accepted"); }
+    catch (IOException) { }
+}));
+tests.Add(("unavailable thread API falls back but cancellation stops discovery", async () =>
+{
+    var f = Fixture(); var deps = new Dependencies(null, null, false, Environment.ProcessPath!);
+    File.WriteAllText(Path.Combine(f.App, "catalog-mode.txt"), "error");
+    File.WriteAllText(Path.Combine(f.Shared, "old.jsonl"), System.Text.Json.JsonSerializer.Serialize(new {
+        type = "session_meta", payload = new { cwd = f.App, id = Guid.NewGuid().ToString() }
+    }));
+    var result = await new WorkspaceCatalogService().ReadAsync(deps, f.App, f.Settings.DefaultCodexHome);
+    Assert(result.Warning is not null && result.Projects.Single().Directory == f.App, "Legacy fallback missing");
+    File.WriteAllText(Path.Combine(f.App, "catalog-mode.txt"), "cancel");
+    using var canceled = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
+    try { await new WorkspaceCatalogService().ReadAsync(deps, f.App, f.Settings.DefaultCodexHome, canceled.Token); throw new Exception("Cancellation ignored"); }
+    catch (OperationCanceledException) { }
+}));
 Test("pinned directory cannot be renamed during deletion checks", () =>
 {
     var f = Fixture(); var a = f.Create("A");
@@ -383,6 +539,120 @@ Test("malformed JSON is not overwritten", () =>
     try { new AccountRepository(f.App).LoadAccounts(); throw new Exception("Malformed JSON accepted"); }
     catch (System.Text.Json.JsonException) { }
     Assert(File.ReadAllText(file) == "{broken", "Malformed JSON replaced");
+});
+Test("manual refresh isolates accounts, preserves other controls and scroll, and cancels on close", () =>
+{
+    var f = Fixture();
+    var items = Enumerable.Range(1, 8).Select(i => f.Create("Account " + i)).ToArray();
+    foreach (var account in items) account.Quota = new QuotaSnapshot { Lines = [new("codex · Weekly", 80, 2000000000)] };
+    var repo = new AccountRepository(f.App); repo.SaveSettings(f.Settings); repo.SaveAccounts(new AccountDocument { Accounts = items.ToList() });
+    var gates = items.ToDictionary(a => a.Id, _ => new TaskCompletionSource<AccountRefreshResult>(TaskCreationOptions.RunContinuationsAsynchronously));
+    var calls = new System.Collections.Concurrent.ConcurrentDictionary<string, int>();
+    var canceled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    Exception? error = null;
+    var thread = new Thread(() =>
+    {
+        try
+        {
+            Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+            Application.EnableVisualStyles();
+            using var form = new CodexAccountManager.MainForm(repo, async (path, token) =>
+            {
+                var id = Path.GetFileName(path); calls.AddOrUpdate(id, 1, (_, n) => n + 1);
+                try { return await gates[id].Task.WaitAsync(token); }
+                catch (OperationCanceledException) { canceled.TrySetResult(); throw; }
+            });
+            void Until(Func<bool> condition)
+            {
+                var deadline = DateTime.UtcNow.AddSeconds(30);
+                while (!condition() && DateTime.UtcNow < deadline) { Application.DoEvents(); Thread.Sleep(10); }
+                Assert(condition(), "Timed out waiting for UI refresh"); Application.DoEvents();
+            }
+            IEnumerable<Control> Descendants(Control parent) => parent.Controls.Cast<Control>().SelectMany(c => new[] { c }.Concat(Descendants(c)));
+            form.Opacity = 0; form.ShowInTaskbar = false;
+            // Use the real WinForms message loop so async button handlers resume on the UI thread.
+            form.Shown += (_, _) => form.BeginInvoke(new Action(() =>
+            {
+                try
+                {
+            Until(() => form.Ready.IsCompleted);
+            var flow = form.Controls.OfType<TableLayoutPanel>().Single().Controls.OfType<FlowLayoutPanel>().Single();
+            Control Card(Account a) => flow.Controls.Cast<Control>().Single(c => Equals(c.Tag, a.Id));
+            Button Refresh(Account a) => Card(a).Controls.Find("refresh", true).OfType<Button>().Single();
+            var untouched = Card(items[2]); var untouchedControls = Descendants(untouched).ToArray();
+            Refresh(items[0]).Focus(); Application.DoEvents();
+            var beforeStart = flow.AutoScrollPosition;
+            Refresh(items[0]).PerformClick(); Until(() => calls.ContainsKey(items[0].Id));
+            Assert(flow.AutoScrollPosition == beforeStart, "Disabling the focused Refresh moved scroll");
+            Assert(!Card(items[0]).Enabled && Card(items[1]).Enabled && flow.Enabled, "Refresh locked another account or scrolling");
+            Assert(Descendants(form).OfType<Button>().Single(b => b.Text == "+ Add account").Enabled, "Refresh locked header input");
+            Refresh(items[1]).PerformClick(); Until(() => calls.ContainsKey(items[1].Id));
+            Refresh(items[0]).PerformClick();
+            Assert(calls[items[0].Id] == 1 && !Card(items[1]).Enabled, "Duplicate refresh or second account not locked");
+            flow.AutoScrollPosition = new System.Drawing.Point(0, 100); Application.DoEvents(); var scroll = flow.AutoScrollPosition;
+            Assert(scroll.Y < 0, "Fixture did not exercise scrolling");
+            gates[items[0].Id].SetResult(new("Logged in (local credentials)", new QuotaSnapshot { Lines = [new("codex · Weekly", 55, 2000000000)] }, null));
+            Until(() => Card(items[0]).Enabled);
+            Assert(!Card(items[1]).Enabled && ReferenceEquals(Card(items[2]), untouched), "Completing refresh replaced or unlocked another card");
+            Assert(untouchedControls.SequenceEqual(Descendants(untouched)) && flow.AutoScrollPosition == scroll, "Refresh rebuilt other controls or moved scroll");
+            Assert(repo.LoadAccounts().Accounts.Single(a => a.Id == items[0].Id).Quota!.Lines.Single().RemainingPercent == 55, "Refresh result not saved");
+            gates[items[1].Id].SetException(new IOException("Synthetic quota failure"));
+            var positions = flow.Controls.Cast<Control>().Select(c => c.Bounds).ToArray();
+            Until(() => Card(items[1]).Enabled);
+            Assert(flow.AutoScrollPosition == scroll && positions.SequenceEqual(flow.Controls.Cast<Control>().Select(c => c.Bounds)), "An error row moved the list or account buttons");
+            Assert(ReferenceEquals(Card(items[2]), untouched) && untouchedControls.SequenceEqual(Descendants(untouched)), "Failed refresh rebuilt other accounts");
+            Assert(Card(items[0]).Height == Card(items[1]).Height, "Quota/error row height mismatch");
+            Assert(Descendants(Card(items[1])).OfType<Label>().Any(l => l.Text.StartsWith("Cached quota")), "Failed refresh lost cached quota");
+            // Real focus, both layouts, and viewport changes while the request is still pending.
+            foreach (var width in new[] { 940, 620 })
+            foreach (var offset in new[] { 0, 100, 100000 })
+            {
+                var scale = form.DeviceDpi / 96f;
+                form.ClientSize = new System.Drawing.Size((int)(width * scale), (int)(565 * scale)); Application.DoEvents();
+                Assert((Card(items[0]).Top == Card(items[1]).Top) == (width == 940), "Fixture did not exercise the intended column layout");
+                var account = items[4]; var card = Card(account); var refresh = Refresh(account);
+                var buttons = Descendants(card).OfType<Button>().ToArray();
+                gates[account.Id] = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                var previousCalls = calls.GetValueOrDefault(account.Id);
+                refresh.Focus(); Application.DoEvents();
+                flow.AutoScrollPosition = new System.Drawing.Point(0, offset); Application.DoEvents();
+                var before = flow.AutoScrollPosition;
+                var bounds = flow.Controls.Cast<Control>().Select(c => c.Bounds).ToArray();
+                refresh.PerformClick(); Until(() => calls.GetValueOrDefault(account.Id) == previousCalls + 1);
+                Assert(flow.AutoScrollPosition == before && bounds.SequenceEqual(flow.Controls.Cast<Control>().Select(c => c.Bounds)), "Focused refresh moved accounts on start");
+                // Scrolling during the request must win over the position at request start.
+                flow.AutoScrollPosition = new System.Drawing.Point(0, offset == 0 ? 100000 : 0); Application.DoEvents();
+                before = flow.AutoScrollPosition; bounds = flow.Controls.Cast<Control>().Select(c => c.Bounds).ToArray();
+                var lines = Enumerable.Range(0, offset == 100 ? 1 : 5).Select(i => new QuotaLine("Window " + i, 55, 2000000000)).ToList();
+                gates[account.Id].SetResult(new("Logged in (local credentials)", new QuotaSnapshot { Lines = lines }, null));
+                Until(() => Card(account).Enabled);
+                Assert(ReferenceEquals(Card(account), card) && ReferenceEquals(Refresh(account), refresh) && buttons.SequenceEqual(Descendants(card).OfType<Button>()), "Refresh replaced the card or its buttons");
+                Assert(flow.AutoScrollPosition == before && bounds.SequenceEqual(flow.Controls.Cast<Control>().Select(c => c.Bounds)), "Changed quota rows shifted accounts at completion");
+                var viewport = card.Controls.Find("quotaViewport", true).OfType<Panel>().Single();
+                Assert(Descendants(viewport).OfType<Label>().Count() == lines.Count, "Quota overflow lost rows");
+                if (lines.Count == 5)
+                {
+                    Assert(viewport.VerticalScroll.Visible, "Additional quota rows are inaccessible");
+                    viewport.AutoScrollPosition = new System.Drawing.Point(0, 10000); Application.DoEvents();
+                    Assert(viewport.AutoScrollPosition.Y < 0 && flow.AutoScrollPosition == before, "Quota overflow scrolling moved the list");
+                }
+            }
+            flow.AutoScrollPosition = new System.Drawing.Point(0, 0);
+            Refresh(items[^1]).Focus(); Application.DoEvents();
+            Assert(flow.AutoScrollPosition.Y < 0, "Keyboard focus no longer reveals off-screen accounts");
+            Refresh(items[3]).PerformClick(); Until(() => calls.ContainsKey(items[3].Id));
+            form.Close(); Until(() => canceled.Task.IsCompleted);
+            Assert(form.IsDisposed, "Refresh prevented closing the app");
+                }
+                catch (Exception ex) { error = ex; }
+                finally { if (!form.IsDisposed) form.Close(); }
+            }));
+            Application.Run(form);
+        }
+        catch (Exception ex) { error = ex; }
+    });
+    thread.SetApartmentState(ApartmentState.STA); thread.Start(); thread.Join();
+    if (error is not null) throw error;
 });
 Test("WinForms renders populated and empty account lists", () =>
 {
@@ -437,14 +707,30 @@ Test("WinForms renders populated and empty account lists", () =>
                     }
                     using var capture = new System.Drawing.Bitmap(dialog.Width, dialog.Height);
                     dialog.DrawToBitmap(capture, new System.Drawing.Rectangle(0, 0, dialog.Width, dialog.Height));
-                    capture.Save(System.IO.Path.Combine(output, file)); dialog.Close();
+                    capture.Save(System.IO.Path.Combine(output, file));
+                    if (dialog is CodexAccountManager.ProjectPickerForm chatPicker)
+                    {
+                        IEnumerable<Control> Descendants(Control parent) => parent.Controls.Cast<Control>().SelectMany(c => new[] { c }.Concat(Descendants(c)));
+                        var controls = Descendants(dialog).ToArray();
+                        controls.OfType<TabControl>().Single().SelectedIndex = 1; Application.DoEvents();
+                        dialog.DrawToBitmap(capture, new System.Drawing.Rectangle(0, 0, dialog.Width, dialog.Height));
+                        capture.Save(System.IO.Path.Combine(output, "ui-projectless-picker.png"));
+                        var resumeButton = controls.OfType<Button>().Single(b => b.Text == "Resume chat");
+                        Assert(resumeButton.Enabled, "Projectless resume is disabled");
+                        resumeButton.PerformClick();
+                        Assert(chatPicker.Selection is { IsProjectless: true, SessionId: not null, Directory: null }, "Projectless resume selection lost");
+                    }
+                    dialog.Close();
                 }
             }
             CaptureDialog(new CodexAccountManager.AddAccountForm(), "ui-add-account.png");
             CaptureDialog(new CodexAccountManager.AccountDetailsForm(a, f.Path(a), f.Shared), "ui-account-details.png");
             CaptureDialog(new CodexAccountManager.AdvancedSettingsForm(f.Settings, new(null, null, false)), "ui-settings.png");
             File.WriteAllText(Path.Combine(f.Shared, "project.jsonl"), System.Text.Json.JsonSerializer.Serialize(new { type = "session_meta", payload = new { cwd = f.App } }));
-            CaptureDialog(new CodexAccountManager.ProjectPickerForm(f.Shared, "Work account"), "ui-project-picker.png");
+            var catalog = WorkspaceCatalogService.Build(f.Settings.DefaultCodexHome, [
+                new(Guid.NewGuid().ToString(), "Update the project", f.App, DateTime.UtcNow),
+                new(Guid.NewGuid().ToString(), "Plan a presentation", null, DateTime.UtcNow)]);
+            CaptureDialog(new CodexAccountManager.ProjectPickerForm("Work account", _ => Task.FromResult(catalog)), "ui-project-picker.png");
         }
         catch (Exception ex) { error = ex; }
     });
@@ -466,9 +752,35 @@ tests.Add(("PowerShell argument quoting and process environment isolation", asyn
         var result = await ShellRunner.RunAsync(deps.PowerShell!, script, special);
         Assert(result.ExitCode == 0 && result.Output.Contains(special) && result.Output.Contains("resume|--all"), "Quoting or isolation failed");
         Assert(result.Output.Contains(f.Settings.DefaultCodexHome) && result.Output.Contains("sqlite_home="), "Shared SQLite override missing");
+        var sessionId = Guid.NewGuid().ToString();
+        var resumeScript = CodexProcessLauncher.BuildScript(fake, special, special, CodexAction.Resume, f.Settings.DefaultCodexHome, sessionId);
+        var resumed = await ShellRunner.RunAsync(deps.PowerShell!, resumeScript, special);
+        Assert(resumed.ExitCode == 0 && resumed.Output.Contains("resume|--all|" + sessionId + "|--cd|" + special), "Exact session ID or cwd override lost");
+        Reject(() => CodexProcessLauncher.BuildScript(fake, special, special, CodexAction.Resume, f.Settings.DefaultCodexHome, "bad'; exit 99"));
         Assert(Environment.GetEnvironmentVariable("CODEX_HOME") == original, "Parent environment changed");
     }
     finally { Environment.SetEnvironmentVariable("OPENAI_API_KEY", originalKey); }
+}));
+tests.Add(("interactive launches repair inherited dumb TERM and preserve other terminal settings", async () =>
+{
+    var f = Fixture(); var deps = await DependencyDetector.DetectAsync(); deps.Require();
+    var legacy = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe");
+    var fake = Path.Combine(f.Root, "fake-terminal.ps1");
+    File.WriteAllText(fake, "[Console]::Out.WriteLine('TERM=' + $env:TERM); exit 0");
+    var originalTerm = Environment.GetEnvironmentVariable("TERM");
+    foreach (var shell in new[] { deps.PowerShell!, legacy }.Distinct(StringComparer.OrdinalIgnoreCase))
+    foreach (var action in new[] { CodexAction.Open, CodexAction.Resume, CodexAction.Login })
+    foreach (var term in new[] { "dumb", "DUMB", "xterm-256color", "vt100", null })
+    {
+        var setup = term is null ? "Remove-Item Env:TERM -ErrorAction SilentlyContinue; "
+            : "$env:TERM = " + ShellRunner.Quote(term) + "; ";
+        var script = setup + CodexProcessLauncher.BuildScript(fake, f.App, f.App, action, f.Settings.DefaultCodexHome);
+        var result = await ShellRunner.RunAsync(shell, script, f.App);
+        var expected = string.Equals(term, "dumb", StringComparison.OrdinalIgnoreCase) ? "xterm-256color" : term;
+        Assert(result.ExitCode == 0 && result.Output.Trim() == "TERM=" + expected,
+            $"Unexpected terminal environment for {shell}, {action}, TERM={term ?? "unset"}: {result.Output} {result.Error}");
+    }
+    Assert(Environment.GetEnvironmentVariable("TERM") == originalTerm, "Parent terminal environment changed");
 }));
 tests.Add(("login exits only on success in PowerShell 7 and 5.1", async () =>
 {
@@ -571,6 +883,108 @@ tests.Add(("warm up uses ephemeral isolated CLI without a saved session", async 
     var before = Directory.GetFiles(f.Shared).Order().ToArray();
     await new WarmUpService().RunAsync(new(null, null, false, Environment.ProcessPath!), f.Path(account), CancellationToken.None);
     Assert(before.SequenceEqual(Directory.GetFiles(f.Shared).Order()), "Warm up changed sessions");
+}));
+Test("MCP schema rejects unknown tools, extra arguments and unsafe types", () =>
+{
+    using var empty = System.Text.Json.JsonDocument.Parse("{}");
+    Reject(() => ManagerMcp.Validate("reset_credits", empty.RootElement));
+    using var extra = System.Text.Json.JsonDocument.Parse("{\"arbitraryCommand\":\"bad\"}");
+    Reject(() => ManagerMcp.Validate("manager_health", extra.RootElement));
+    using var invalid = System.Text.Json.JsonDocument.Parse("{\"sessionId\":1,\"text\":\"hello\"}");
+    Reject(() => ManagerMcp.Validate("session_send", invalid.RootElement));
+    using var missing = System.Text.Json.JsonDocument.Parse("{\"sessionId\":\"valid\"}");
+    Reject(() => ManagerMcp.Validate("session_send", missing.RootElement));
+});
+Test("automation account projection never includes notes or profile credential paths", () =>
+{
+    var a = new Account { DisplayName = "fixture@example.com", Note = "DO-NOT-EXPOSE-CREDENTIAL", ProfilePath = "profiles/private" };
+    var json = System.Text.Json.JsonSerializer.Serialize(ManagerAutomation.AccountView(a, 0));
+    Assert(!json.Contains("DO-NOT-EXPOSE") && !json.Contains("ProfilePath") && !json.Contains("Note"), "Private account data escaped");
+});
+Test("quota switching refuses stale, exhausted, missing-weekly and credits-only accounts", () =>
+{
+    var a = new Account { Quota = new() { Lines = [new("codex · 5 hours", 100, null, WindowDurationMins: 300), new("codex · Weekly", 25, null, WindowDurationMins: 10080)] } };
+    Assert(ManagerAutomation.Eligible(a, 100), "Eligible account refused");
+    a.Quota.FetchedAt = DateTimeOffset.UtcNow.AddMinutes(-5); Assert(!ManagerAutomation.Eligible(a, 20), "Stale quota accepted");
+    a.Quota.FetchedAt = DateTimeOffset.UtcNow; a.Quota.Lines[1] = new("codex · Weekly", 0, null, WindowDurationMins: 10080);
+    Assert(!ManagerAutomation.Eligible(a, 20), "Exhausted weekly quota accepted");
+    a.Quota.Lines = [new("codex · Credits", null, null, "500")]; Assert(!ManagerAutomation.Eligible(a, 20), "Credits accepted as quota");
+});
+Test("session runtime protects path traversal and reused process identity", () =>
+{
+    var f = Fixture(); var runtime = new SessionRuntime(f.App);
+    Reject(() => runtime.PathFor("../accounts"));
+    using var process = System.Diagnostics.Process.GetCurrentProcess();
+    var record = runtime.Track(process, "account", f.App, null, "managed");
+    Assert(SessionRuntime.Alive(record), "Current process not recognized");
+    record.ProcessStartedTicks--; Assert(!SessionRuntime.Alive(record), "Reused PID accepted");
+    Reject(() => SessionRuntime.StopTerminal(record));
+});
+Test("saved permission policy retains writable roots, network and temp exclusions", () =>
+{
+    using var saved = JsonDocument.Parse("{\"type\":\"workspace-write\",\"writable_roots\":[\"C:\\\\allowed\"],\"network_access\":false,\"exclude_tmpdir_env_var\":true,\"exclude_slash_tmp\":true}");
+    var mapped = ManagedCliHost.SandboxOverride(saved.RootElement);
+    Assert(mapped.GetProperty("type").GetString() == "workspaceWrite" && mapped.GetProperty("writableRoots")[0].GetString() == "C:\\allowed", "Writable roots changed");
+    Assert(!mapped.GetProperty("networkAccess").GetBoolean() && mapped.GetProperty("excludeTmpdirEnvVar").GetBoolean() && mapped.GetProperty("excludeSlashTmp").GetBoolean(), "Sandbox policy weakened");
+    using var unknown = JsonDocument.Parse("{\"type\":\"unsupported\"}"); Reject(() => ManagedCliHost.SandboxOverride(unknown.RootElement));
+});
+tests.Add(("MCP stdio handshake and tool errors remain valid JSON-RPC", async () =>
+{
+    var input = new StringReader("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\"}}\n{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}\n{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"reset_credits\",\"arguments\":{}}}\n");
+    var output = new StringWriter();
+    await ManagerMcp.Run(input, output, (_, _) => Task.FromResult(System.Text.Json.JsonSerializer.SerializeToElement(new { healthy = true })));
+    var lines = output.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);
+    Assert(lines.Length == 3, "Notification produced a response or protocol request was lost");
+    using var tools = System.Text.Json.JsonDocument.Parse(lines[1]);
+    Assert(tools.RootElement.GetProperty("result").GetProperty("tools").GetArrayLength() == 15, "Tool inventory incomplete");
+    using var error = System.Text.Json.JsonDocument.Parse(lines[2]);
+    Assert(error.RootElement.GetProperty("result").GetProperty("isError").GetBoolean(), "Unknown mutation was accepted");
+}));
+tests.Add(("current-user pipe request survives without an interactive desktop", async () =>
+{
+    var f = Fixture(); var name = AutomationPipe.Name(f.App, "fixture");
+    using var host = new AutomationPipe(name, (method, arguments) => Task.FromResult<object>(new { method, arguments }));
+    host.Start();
+    var result = await AutomationPipe.Call(name, "read", new { text = "Thuốc tiếng Việt" });
+    Assert(result.GetProperty("arguments").GetProperty("text").GetString() == "Thuốc tiếng Việt", "Unicode or pipe routing lost");
+}));
+tests.Add(("managed CLI resume, send, approval, steer, interrupt and stop use persistent protocol", async () =>
+{
+    var f = Fixture(); var account = f.Create("Managed fixture");
+    var runtime = new SessionRuntime(f.App);
+    using var current = System.Diagnostics.Process.GetCurrentProcess();
+    var record = runtime.Track(current, account.Id, f.App, "00000000-0000-0000-0000-000000000003", "managed");
+    var day = Path.Combine(f.Shared, "2026", "10", "03"); Directory.CreateDirectory(day);
+    File.WriteAllText(Path.Combine(day, "rollout-" + record.ThreadId + ".jsonl"), JsonSerializer.Serialize(new { type = "turn_context", payload = new { model = "fixture-model", effort = "high", approval_policy = "never", sandbox_policy = new { type = "danger-full-access" } } }) + "\n");
+    var deps = new Dependencies(null, null, false, Environment.ProcessPath!);
+    var info = ManagedCliHost.StartInfo(Environment.ProcessPath!, f.Path(account), f.App, f.App);
+    Assert(!info.Environment.ContainsKey("OPENAI_API_KEY") && info.Environment["CODEX_HOME"] == f.Path(account), "Inherited authentication overrides");
+    using var worker = new ManagedCliHost(runtime, record, deps, f.Path(account), f.Settings.DefaultCodexHome);
+    var running = worker.Run();
+    var name = AutomationPipe.Name(f.App, "session-" + record.Id);
+    JsonElement readyState = default;
+    for (var retry = 0; retry < 25; retry++)
+    {
+        try { readyState = await AutomationPipe.Call(name, "read", new { }); break; }
+        catch (IOException) { await Task.Delay(100); }
+    }
+    Assert(readyState.GetProperty("threadId").GetString() == record.ThreadId, "Resume changed thread ID");
+    await AutomationPipe.Call(name, "send", new { text = "approval" });
+    await Task.Delay(100);
+    var state = await AutomationPipe.Call(name, "read", new { });
+    Assert(state.GetProperty("pendingRequests").GetArrayLength() == 1, "Approval was automatically accepted or lost");
+    using var bad = System.Text.Json.JsonDocument.Parse("{\"decision\":\"unsafe\"}");
+    Reject(() => ManagedCliHost.ValidateReply("item/commandExecution/requestApproval", bad.RootElement));
+    await AutomationPipe.Call(name, "reply", new { requestId = "approval-1", result = new { decision = "decline" } });
+    await AutomationPipe.Call(name, "steer", new { text = "more guidance" });
+    try { await AutomationPipe.Call(name, "send", new { text = "duplicate" }); throw new Exception("Duplicate active turn accepted"); }
+    catch (IOException) { }
+    var interrupted = await AutomationPipe.Call(name, "interrupt", new { });
+    Assert(interrupted.GetProperty("status").GetString() == "interrupted", "Interrupt did not wait for acknowledgement");
+    await AutomationPipe.Call(name, "stop", new { });
+    await running.WaitAsync(TimeSpan.FromSeconds(10));
+    using var saved = System.Text.Json.JsonDocument.Parse(File.ReadAllText(runtime.PathFor(record.Id, ".state.json")));
+    Assert(saved.RootElement.GetProperty("status").GetString() == "stopped", "Final session state not persisted");
 }));
 var failures = 0;
 try

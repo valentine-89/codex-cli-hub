@@ -29,23 +29,23 @@ public static class DependencyDetector
         if (File.Exists(legacy)) yield return legacy;
     }
 
-    public static async Task<Dependencies> DetectAsync(IEnumerable<string>? candidates = null)
+    public static async Task<Dependencies> DetectAsync(IEnumerable<string>? candidates = null, CancellationToken cancellationToken = default)
     {
         string? pwsh = null; var major = 0;
         foreach (var candidate in (candidates ?? FindPowerShellCandidates()).Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            var version = await ShellRunner.RunAsync(candidate, "[Console]::Out.Write($PSVersionTable.PSVersion.Major)", null);
+            var version = await ShellRunner.RunAsync(candidate, "[Console]::Out.Write($PSVersionTable.PSVersion.Major)", null, cancellationToken: cancellationToken);
             if (version.ExitCode != 0 || !int.TryParse(version.Output.Trim(), out var foundMajor)) continue;
             if (pwsh is null || foundMajor >= 7) { pwsh = candidate; major = foundMajor; }
             if (major >= 7) break;
         }
         if (pwsh is null) return new(null, null, false);
         var result = await ShellRunner.RunAsync(pwsh,
-            "$c = Get-Command codex -CommandType Application,ExternalScript -ErrorAction SilentlyContinue | Select-Object -First 1; if ($c) { [Console]::Out.Write($c.Source) }", null);
+            "$c = Get-Command codex -CommandType Application,ExternalScript -ErrorAction SilentlyContinue | Select-Object -First 1; if ($c) { [Console]::Out.Write($c.Source) }", null, cancellationToken: cancellationToken);
         if (result.ExitCode != 0) return new(null, null, false);
         var codex = result.Output.Trim();
         if (!Path.IsPathFullyQualified(codex) || !File.Exists(codex)) return new(pwsh, null, false, PowerShellMajor: major);
-        var help = await ShellRunner.RunAsync(pwsh, "& " + ShellRunner.Quote(codex) + " login --help; exit $LASTEXITCODE", null);
+        var help = await ShellRunner.RunAsync(pwsh, "& " + ShellRunner.Quote(codex) + " login --help; exit $LASTEXITCODE", null, cancellationToken: cancellationToken);
         return new(pwsh, codex, help.ExitCode == 0 && help.Output.Contains("status", StringComparison.Ordinal), FindNativeCodex(codex), major);
     }
 
@@ -74,7 +74,7 @@ public static class ShellRunner
     public const string Utf8Setup = "$ProgressPreference = 'SilentlyContinue'; $OutputEncoding = [System.Text.UTF8Encoding]::new($false); [Console]::InputEncoding = $OutputEncoding; [Console]::OutputEncoding = $OutputEncoding; ";
     public static string Quote(string value) => "'" + value.Replace("'", "''") + "'";
     public static string Encode(string script) => Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
-    public static async Task<ShellResult> RunAsync(string pwsh, string script, string? home, int timeoutSeconds = 20)
+    public static async Task<ShellResult> RunAsync(string pwsh, string script, string? home, int timeoutSeconds = 20, CancellationToken cancellationToken = default)
     {
         var info = new ProcessStartInfo(pwsh) { UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardOutput = true, RedirectStandardError = true, StandardOutputEncoding = Encoding.UTF8,
@@ -87,10 +87,12 @@ public static class ShellRunner
             info.WorkingDirectory = home;
             foreach (var key in IsolatedEnvironmentVariables) info.Environment.Remove(key);
         }
+        cancellationToken.ThrowIfCancellationRequested();
         using var process = Process.Start(info) ?? throw new IOException("Cannot start PowerShell.");
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
         try { await process.WaitForExitAsync(timeout.Token); }
         catch (OperationCanceledException)
         {
@@ -98,6 +100,7 @@ public static class ShellRunner
             process.Kill(true);
             await process.WaitForExitAsync();
             await Task.WhenAll(stdout, stderr);
+            cancellationToken.ThrowIfCancellationRequested();
             throw new TimeoutException("Codex check timed out. Interactive terminals were not affected.");
         }
         return new(process.ExitCode, await stdout, await stderr);
@@ -115,32 +118,41 @@ public enum CodexAction { Open, Login, Resume }
 public sealed class CodexProcessLauncher
 {
     private readonly Dictionary<string, List<Process>> terminals = [];
-    public static string BuildScript(string codex, string home, string workingDirectory, CodexAction action, string sharedHome)
+    public Action<Process, string, string, string?>? OnLaunched { get; set; }
+    public static string BuildScript(string codex, string home, string workingDirectory, CodexAction action, string sharedHome, string? sessionId = null)
     {
+        if (sessionId is not null && (action != CodexAction.Resume || !Guid.TryParse(sessionId, out _)))
+            throw new IOException("Invalid resume session ID.");
         var args = action switch { CodexAction.Login => " login", CodexAction.Resume => " resume --all", _ => "" };
+        var cwd = SessionProjectCatalog.NormalizeWorkingDirectory(workingDirectory);
+        if (sessionId is not null) args += " " + ShellRunner.Quote(sessionId) + " --cd " + ShellRunner.Quote(cwd);
         var clear = string.Join("; ", ShellRunner.IsolatedEnvironmentVariables.Select(k => "Remove-Item Env:" + k + " -ErrorAction SilentlyContinue"));
         var shared = PathSafety.Canonical(sharedHome);
         var sqliteOverride = ShellRunner.Quote("sqlite_home=" + System.Text.Json.JsonSerializer.Serialize(shared));
         return "$ErrorActionPreference = 'Stop'; $env:CODEX_HOME = " + ShellRunner.Quote(PathSafety.Canonical(home))
             + "; " + clear + "; " + ShellRunner.Utf8Setup
+            // A newly opened Windows console must not inherit a headless parent's terminal type.
+            + "if ($env:TERM -eq 'dumb') { $env:TERM = 'xterm-256color' }; "
             + "$env:CODEX_SQLITE_HOME = " + ShellRunner.Quote(shared) + "; "
-            + "Set-Location -LiteralPath " + ShellRunner.Quote(PathSafety.Canonical(workingDirectory))
+            + "Set-Location -LiteralPath " + ShellRunner.Quote(cwd)
             + "; $LASTEXITCODE = $null; & " + ShellRunner.Quote(codex) + " -c 'cli_auth_credentials_store=\"file\"' -c " + sqliteOverride + args
             + (action == CodexAction.Login ? "; if ($? -and $LASTEXITCODE -eq 0) { exit 0 }" : "");
     }
 
-    public void Launch(Dependencies dependencies, string id, string home, string workingDirectory, CodexAction action, string sharedHome)
+    public void Launch(Dependencies dependencies, string id, string home, string workingDirectory, CodexAction action, string sharedHome, string? sessionId = null)
     {
         dependencies.Require();
-        PathSafety.OrdinaryDirectory(workingDirectory);
+        workingDirectory = SessionProjectCatalog.NormalizeWorkingDirectory(workingDirectory);
+        if (!Directory.Exists(workingDirectory)) throw new IOException("Working directory is unavailable. Refresh the project list.");
         var info = new ProcessStartInfo(dependencies.PowerShell!) { UseShellExecute = true,
             WorkingDirectory = workingDirectory, WindowStyle = ProcessWindowStyle.Normal };
         info.ArgumentList.Add("-NoLogo"); info.ArgumentList.Add("-NoProfile"); info.ArgumentList.Add("-NoExit");
         info.ArgumentList.Add("-EncodedCommand");
-        info.ArgumentList.Add(ShellRunner.Encode(BuildScript(dependencies.Codex!, home, workingDirectory, action, sharedHome)));
+        info.ArgumentList.Add(ShellRunner.Encode(BuildScript(dependencies.Codex!, home, workingDirectory, action, sharedHome, sessionId)));
         var process = Process.Start(info) ?? throw new IOException("Unable to open the terminal.");
         if (!terminals.TryGetValue(id, out var list)) terminals[id] = list = [];
         list.Add(process);
+        if (action != CodexAction.Login) OnLaunched?.Invoke(process, id, workingDirectory, sessionId);
     }
 
     public bool IsRunning(string id)
@@ -154,13 +166,13 @@ public sealed class CodexProcessLauncher
 
 public sealed class CodexStatusService
 {
-    public async Task<string> CheckAsync(Dependencies dependencies, string home)
+    public async Task<string> CheckAsync(Dependencies dependencies, string home, CancellationToken cancellationToken = default)
     {
         dependencies.Require();
         if (!dependencies.LoginStatusSupported) return "Not available";
         var script = "& " + ShellRunner.Quote(dependencies.Codex!)
             + " -c 'cli_auth_credentials_store=\"file\"' login status; exit $LASTEXITCODE";
-        var result = await ShellRunner.RunAsync(dependencies.PowerShell!, script, home);
+        var result = await ShellRunner.RunAsync(dependencies.PowerShell!, script, home, cancellationToken: cancellationToken);
         return Classify(result);
     }
 

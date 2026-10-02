@@ -51,6 +51,7 @@ internal static class Theme
 }
 internal sealed class AccountCard : Panel
 {
+    public Action? RefreshContent { get; set; }
     public AccountCard() { DoubleBuffered = true; BackColor = Color.White; Padding = new Padding(Theme.Scale(14), Theme.Scale(8), Theme.Scale(14), Theme.Scale(8)); Margin = new Padding(0, 0, Theme.Scale(14), Theme.Scale(10)); }
     protected override void OnPaint(PaintEventArgs e)
     {
@@ -58,4 +59,29 @@ internal sealed class AccountCard : Panel
         using var pen = new Pen(Color.FromArgb(220, 229, 233));
         e.Graphics.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
     }
+}
+
+internal sealed class AccountListPanel : FlowLayoutPanel
+{
+    private bool updating;
+
+    public AccountListPanel() => SetStyle(ControlStyles.Selectable, true);
+
+    public void UpdateWithoutScrolling(Action update)
+    {
+        var scroll = AutoScrollPosition;
+        var wasUpdating = updating;
+        updating = true;
+        try { update(); }
+        finally
+        {
+            AutoScrollPosition = new Point(-scroll.X, -scroll.Y);
+            updating = wasUpdating;
+        }
+    }
+
+    // Pointer focus must not move a partially visible button out from under the mouse.
+    // Keyboard navigation still brings its target into view outside a content update.
+    protected override Point ScrollToControl(Control activeControl) =>
+        updating || MouseButtons != MouseButtons.None ? AutoScrollPosition : base.ScrollToControl(activeControl);
 }

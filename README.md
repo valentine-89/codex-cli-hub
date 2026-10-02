@@ -3,6 +3,27 @@
 Ứng dụng Windows desktop portable quản lý nhiều profile Codex CLI. C#/.NET 8,
 WinForms, giao diện thẻ với cửa sổ thêm tài khoản/cài đặt riêng; không installer/service.
 
+Từ **v1.11.0**, app có MCP điều khiển quota và phiên CLI qua stdio/named pipe của cùng người dùng Windows.
+Không cần computer-use hoặc mở khóa màn hình. Khi GUI đóng, bridge chạy nền; máy vẫn cần bật và không sleep.
+Cài bằng `pwsh -File ./scripts/install-mcp.ps1`.
+
+MCP `codex_account_manager` có 15 tools: `manager_health`, `accounts_list`, `account_refresh`,
+`projects_list`, `sessions_list`, `session_read`, `session_start`, `session_resume`, `session_take_control`,
+`session_switch_account`, `session_send`, `session_steer`, `session_interrupt`, `session_stop`, `session_reply`.
+`sessionId` là ID Manager trả về; `threadId` là ID hội thoại Codex, giữ nguyên khi đổi tài khoản.
+`session_resume` không gửi model turn nếu chưa truyền `text`. Dùng `session_send` cho phiên rảnh;
+phiên đang chạy dùng `session_steer`. Yêu cầu duyệt được trả về để người gọi xử lý, không tự duyệt.
+
+CLI mở từ giao diện vẫn là terminal tương tác. MCP đọc/dừng được phiên đã nhận diện; dùng
+`session_take_control` để ngắt và chuyển cùng hội thoại sang CLI app-server trước khi gửi/steer bằng API.
+Không cần chuyển job đang chạy để đọc quota. `session_switch_account` xác minh quota đích trước khi dừng nguồn;
+truyền `excludeLastAccount=true`, `excludedAccountIds`, `minimumRemainingPercent` theo chính sách job.
+Mặc định chỉ chuyển khi quota nguồn cạn. MCP không có thao tác dùng reset credits, xóa tài khoản hoặc Apply auth.
+
+`--call <tool> --json '<arguments>'` gọi cùng handler qua named pipe và trả JSON, dùng được trong lịch hiện tại
+khi kết nối Codex chưa tải registry MCP mới. Trạng thái nằm trong `runtime/sessions/`; PID + creation time +
+executable ngăn dừng nhầm process. Mở lại GUI tiếp quản khóa ghi account từ bridge nền và giữ worker đang chạy.
+
 Từ v1.4.0, giao diện app sử dụng **English**. Tên/note tài khoản do người dùng nhập giữ nguyên.
 
 **Warm up** gửi `reply "OK"` bằng CLI của tài khoản đang chọn, chạy nền và không lưu session
@@ -65,17 +86,42 @@ thư mục junction/symlink, network share hoặc thư mục shared sessions.
    Chọn **Details** để sửa tên/ghi chú và bấm **Save**; thẻ cập nhật ngay, giữ nguyên phiên login.
 6. **Settings** mở cửa sổ nâng cao: Codex Home gốc, thư mục làm việc, đường dẫn CLI/PowerShell và link .NET.
 
-**Open** luôn hiện cửa sổ chọn dự án trước khi mở terminal. Danh sách trích `payload.cwd` trong
-record `session_meta` của các file `.jsonl` dưới sessions gốc, gộp trùng (không phân biệt hoa thường),
-xếp tên repo A–Z, đường dẫn làm thứ tự phụ khi trùng tên; thư mục đã mất nằm cuối. Có ô tìm kiếm và **Browse…**.
-Thư mục đã mất được đánh dấu và không thể Open. Hủy sẽ không mở terminal; chọn dự án không
-thay đổi cài đặt chung. Catalog chỉ parse phần đầu metadata giới hạn 128 KiB mỗi file,
-không duyệt qua junction con hoặc đọc nội dung hội thoại để suy đoán dự án.
-Session lỗi/không có cwd/đường dẫn ngoài định dạng Windows local được bỏ qua và đếm trên dialog.
+**Open CLI** hiện hai tab: **Projects** và **Chats without project**.
+- **Projects**: danh sách thư mục A–Z và các phiên trong thư mục được chọn. **New chat** tạo phiên mới,
+  **Resume chat** tiếp tục đúng phiên, **Browse…** chọn thư mục khác. Thư mục không còn tồn tại được
+  đánh dấu; chọn phiên ở thư mục đó rồi Browse để tiếp tục tại vị trí mới.
+- **Chats without project**: hiển thị riêng các chat không gắn dự án của Desktop và manager.
+  Có thể tiếp tục chat hoặc tạo chat mới mà không cần chọn thư mục. CLI vẫn cần một thư mục làm việc:
+  phiên cũ giữ thư mục nội bộ nếu còn tồn tại. Từ 1.10.2, phiên mới dùng
+  `<UserProfile>/Documents/Codex/YYYY-MM-DD/new-chat` (thêm `-2`, `-3` khi trùng), có `work` và `outputs`,
+  khớp quy ước nhận diện tự động của Desktop 26.924. Không dùng thư mục credential làm workspace.
+  Manager dùng đường dẫn Documents/Codex mặc định để Desktop tự nhận diện, không sửa cấu hình thư mục
+  tùy chỉnh hay global state của Desktop. Desktop có thể cần tải lại danh sách để thấy phiên CLI mới.
+
+Danh sách hiện tại lấy qua app-server `thread/list`, đọc hết các trang từ SQLite chung, gồm phiên
+CLI/Desktop tương tác chưa archive và không lọc provider. Bổ sung các thư mục đã lưu trong Desktop;
+dùng dấu projectless của Desktop để phân loại, không suy đoán từ việc thiếu Git hoặc thư mục bị mất.
+Hỗ trợ tiền tố Windows `\\?\`, UNC/WSL, `/mnt/<drive>` và đường dẫn cũ `C:\mnt\<drive>` khi đích thật tồn tại.
+**Refresh** tải lại danh sách; ô tìm kiếm lọc đường dẫn và tên chat. Resume truyền ID và `--cd` rõ ràng.
+Nếu API không dùng được, dialog thông báo đang dùng metadata JSONL cũ (chỉ record đầu, tối đa 16 MiB,
+không đọc nội dung hội thoại hoặc đi qua junction con). Fallback có thể thiếu các phiên chỉ lưu trong SQLite.
+Đọc danh sách không chạy model turn, không sửa Desktop global state hay nội dung session.
+
+Phiên tạo bằng 1.10.0/1.10.1 trong `manager-chats` vẫn được manager liệt kê, nhưng Desktop chưa có dấu
+nhận diện. Dùng `python scripts/repair-projectless-chat.py --home <Default Codex Home>` để xem danh sách
+cần sửa; đóng Desktop rồi thêm `--apply`. Công cụ sao lưu global state và chỉ thêm dấu projectless cùng
+đường dẫn file cho các phiên này. Không di chuyển thư mục, sửa cwd, database hay nội dung hội thoại.
+Mở lại Desktop để nạp metadata. Không sửa file global state khi Desktop còn chạy.
 
 Có thể mở nhiều account đồng thời. Đóng manager không đóng/kill terminal.
-Không có tự động polling. **Refresh trên thẻ** kiểm tra dependency, junction và login của chính
-tài khoản đó. Tạo bằng cách sao chép cũng kiểm tra login local một lần nếu CLI có sẵn.
+**Refresh trên thẻ** kiểm tra dependency, junction, login và quota ở nền; chỉ khóa thẻ đang refresh.
+Vẫn cuộn danh sách, thao tác và refresh các tài khoản khác cùng lúc. Refresh tay, tự động và Warm up
+không chạy chồng trên cùng tài khoản. Khi xong chỉ cập nhật thẻ đó, giữ vị trí cuộn và các control của
+thẻ khác. Từ 1.10.4, giữ nguyên cả nút và chiều cao thẻ khi refresh, tránh tự cuộn do focus.
+Nếu phát sinh thêm dòng quota/lỗi, cuộn trong vùng quota để xem; vị trí các tài khoản giữ nguyên.
+Lỗi giữ quota cũ để thử lại.
+Đóng app sẽ hủy các tác vụ refresh đang chạy. Tạo bằng cách sao chép cũng kiểm tra login local
+một lần nếu CLI có sẵn. Refresh tự động sau mốc reset vẫn chạy lần lượt theo hàng đợi riêng.
 CLI/Powershell không tìm thấy được báo trong status bar, không làm app crash.
 
 ## Dữ liệu và credential
@@ -211,6 +257,9 @@ Manager sẽ từ chối đoán tiếp nếu junction thiếu. Không bấm recu
    cả cây chưa kiểm tra. Nếu tạo junction đã thất bại và chỉ để lại sessions rỗng bình thường,
    chỉ xóa riêng thư mục rỗng đó (không recursive), tạo junction đã xác minh rồi đăng ký record.
 6. JSON lỗi: sửa cú pháp/version/schema trong file hiện có. Không sửa nội dung auth.json.
+7. Cảnh báo `TERM is set to "dumb"`: terminal nhận cấu hình hiển thị cơ bản từ tiến trình cha.
+   Từ 1.10.3, manager tự đổi riêng giá trị `dumb` thành `xterm-256color` khi mở CLI,
+   Resume hoặc Login. Mở lại manager sau khi cập nhật để các cửa sổ mới nhận bản sửa.
 
 ```json
 {
