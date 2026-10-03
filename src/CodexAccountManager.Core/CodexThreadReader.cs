@@ -104,7 +104,7 @@ public sealed class CodexThreadReader
             try { updated = DateTimeOffset.FromUnixTimeSeconds(seconds).UtcDateTime; } catch (ArgumentOutOfRangeException) { }
         return new(id!, name, Text(row, "cwd"), updated, Text(row, "projectId"));
     }
-    internal static string? Text(JsonElement value, string key) => value.ValueKind == JsonValueKind.Object
+    public static string? Text(JsonElement value, string key) => value.ValueKind == JsonValueKind.Object
         && value.TryGetProperty(key, out var child) && child.ValueKind == JsonValueKind.String
         && !string.IsNullOrWhiteSpace(child.GetString()) ? child.GetString() : null;
     private static async Task Drain(StreamReader reader)

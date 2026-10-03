@@ -29,6 +29,7 @@ public sealed class MainForm : Form
     private readonly ManagerAutomation automation;
     private readonly SessionRuntime sessionRuntime;
     private AutomationPipe? automationPipe;
+    private SessionsForm? sessionsWindow;
     public Task Ready => ready.Task;
 
     public MainForm(AccountRepository repository, Func<string, CancellationToken, Task<AccountRefreshResult>>? readAccount = null)
@@ -83,6 +84,7 @@ public sealed class MainForm : Form
 
         var topActions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Anchor = AnchorStyles.Right, AutoSize = true, FlowDirection = FlowDirection.RightToLeft, Margin = new Padding(0, Theme.Scale(20), Theme.Scale(16), 0) };
         topActions.Controls.Add(ActionButton("Settings", SettingsDialog, false, 100));
+        topActions.Controls.Add(ActionButton("Sessions", () => { ShowSessions(); return Task.CompletedTask; }, false, 100));
         topActions.Controls.Add(ActionButton("+ Add account", AddAccount, true, 155));
         headerLayout.Controls.Add(topActions, 2, 0);
         headerLayout.SetRowSpan(topActions, 2);
@@ -120,7 +122,7 @@ public sealed class MainForm : Form
         BeginInvoke(new Action(async () =>
         {
             try { completion.TrySetResult(await automation.Call(method, args)); }
-            catch (Exception ex) { completion.TrySetException(ex); }
+            catch (Exception ex) { logger.Write("mcp-error:" + method + ":" + ex.GetType().Name, exitCode: ex.HResult); completion.TrySetException(ex); }
         }));
         return completion.Task;
     }
@@ -331,10 +333,16 @@ public sealed class MainForm : Form
             sessionId = selection.SessionId;
             if (sessionId is not null) action = CodexAction.Resume;
         }
-        if (sessionId is not null && sessionRuntime.List().Any(r => r.ThreadId == sessionId && SessionRuntime.Alive(r)))
-            throw new IOException("This chat already has a running CLI session. Stop it before resuming again.");
+        if (sessionId is not null && sessionRuntime.List().FirstOrDefault(r => r.ThreadId == sessionId && SessionRuntime.Alive(r)) is { } owner)
+        { ShowSessions(owner.Id); status.Text = "Session shown. Stop it before resuming again."; return Task.CompletedTask; }
         launcher.Launch(dependencies, account.Id, path, workingDirectory, action, settings.DefaultCodexHome, sessionId);
         logger.Write("launch:" + action, path); status.Text = "Opened " + account.DisplayName; return Task.CompletedTask;
+    }
+    private void ShowSessions(string? id = null)
+    {
+        if (sessionsWindow is null || sessionsWindow.IsDisposed)
+        { sessionsWindow = new(repository, id); sessionsWindow.Show(this); }
+        else { if (id is not null) sessionsWindow.SelectSession(id); sessionsWindow.Activate(); }
     }
     private async Task Check(Account account)
     {

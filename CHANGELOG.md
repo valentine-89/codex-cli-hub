@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.11.1 — 2026-10-03
+
+- Add Open terminal to transfer the same stored thread/account to a normal interactive CLI without a new model turn. Add a Sessions window for managed background workers and interactive terminals, with current activity, latest response, Stop and explicit Force stop controls. Closing the viewer leaves CLI workers running.
+- MCP start/resume/account switching now open a visible interactive terminal by default, with the initial prompt passed as one quoted CLI argument. Preserve saved model, effort and permission policy. Explicit visible=false selects app-server control.
+- Show the owning session when Resume finds an existing worker. Distinguish completed idle workers from active work and recover current state from bounded rollout records.
+- Classify quota-exhausted turn completion as failure, ignore partially written records and verify process identity before manual stop. Stop finished workers even when their protocol pipe is unresponsive.
+
 ## 1.11.0 — 2026-10-03
 
 - Add 15 stdio MCP tools and a current-user named pipe; auto-start a headless Manager when the GUI is closed. No desktop input or unlock required.

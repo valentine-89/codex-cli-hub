@@ -13,6 +13,7 @@ public sealed class ManagerAutomation
     private readonly string executable;
     private readonly string hostMode;
     private readonly SessionRuntime runtime;
+    private readonly CodexProcessLauncher launcher = new();
     private readonly SemaphoreSlim operations = new(1, 1);
     public ManagerAutomation(AccountRepository repository, Func<AccountDocument> accounts, Func<AppSettings> settings,
         Func<Account, Task> refresh, Func<Task<Dependencies>> dependencies, string executable, string hostMode = "desktop")
@@ -25,7 +26,7 @@ public sealed class ManagerAutomation
         await operations.WaitAsync();
         try
         {
-            if (tool == "manager_health") return new { version = "1.11.0", processId = Environment.ProcessId,
+            if (tool == "manager_health") return new { version = "1.11.1", processId = Environment.ProcessId,
                 transport = "stdio + current-user named pipe", supportsLockedDesktop = true, root = repository.Root, hostMode };
             if (tool == "accounts_list") return new { accounts = accounts().Accounts.Select((a, i) => AccountView(a, i)).ToArray() };
             if (tool == "account_refresh")
@@ -58,16 +59,18 @@ public sealed class ManagerAutomation
                     throw new IOException("Stored thread not found. No new session was created.");
                 await runtime.DiscoverExisting(await dependencies(), accounts().Accounts, settings().DefaultCodexHome);
                 EnsureNotRunning(threadId, cwd);
-                var record = await Start(account, cwd, threadId);
-                if (Optional(args, "text") is { } text)
+                var visible = Visible(args);
+                var record = await Start(account, cwd, threadId, visible, Optional(args, "text"));
+                if (!visible && Optional(args, "text") is { } text)
                     await AutomationPipe.Call(AutomationPipe.Name(repository.Root, "session-" + record.Id), "send", new { text });
                 return runtime.Read(runtime.Get(record.Id), settings().DefaultCodexHome);
             }
-            if (tool == "session_take_control" || tool == "session_switch_account")
+            if (tool is "session_take_control" or "session_switch_account" or "session_open_terminal")
             {
                 var old = runtime.Get(Required(args, "sessionId"));
                 if (old.ThreadId is null) throw new IOException("Terminal has no known thread ID. Resume an explicitly selected stored thread instead.");
-                var target = tool == "session_take_control" ? Account(old.AccountId) : Account(Required(args, "accountId"));
+                var target = tool == "session_switch_account" ? Account(Required(args, "accountId")) : Account(old.AccountId);
+                if (tool == "session_open_terminal" && old.Mode == "terminal" && SessionRuntime.Alive(old)) return runtime.Read(old, settings().DefaultCodexHome);
                 if (tool == "session_take_control" && old.Mode == "managed") return runtime.Read(old, settings().DefaultCodexHome);
                 if (tool == "session_switch_account")
                 {
@@ -92,10 +95,12 @@ public sealed class ManagerAutomation
                 // Prepare target and validate stored thread before stopping the current owner.
                 new CodexProfileService(repository.Root, new JunctionService()).PrepareSharedStore(target, settings());
                 if (RolloutStatus.Find(settings().DefaultCodexHome, old.ThreadId) is null) throw new IOException("Stored thread unavailable. Original session was not stopped.");
+                var visible = tool == "session_open_terminal" || tool == "session_switch_account" && Visible(args);
+                if (visible) ValidateTerminal(old.ThreadId, old.WorkingDirectory, Optional(args, "text"));
                 if (SessionRuntime.Alive(old)) await Stop(old);
                 EnsureNotRunning(old.ThreadId, old.WorkingDirectory);
-                var record = await Start(target, old.WorkingDirectory, old.ThreadId);
-                if (Optional(args, "text") is { } text)
+                var record = await Start(target, old.WorkingDirectory, old.ThreadId, visible, Optional(args, "text"));
+                if (!visible && Optional(args, "text") is { } text)
                     await AutomationPipe.Call(AutomationPipe.Name(repository.Root, "session-" + record.Id), "send", new { text });
                 return runtime.Read(runtime.Get(record.Id), settings().DefaultCodexHome);
             }
@@ -125,12 +130,26 @@ public sealed class ManagerAutomation
         if (runtime.List().Any(r => SessionRuntime.Alive(r) && (threadId is not null ? r.ThreadId == threadId : PathSafety.Same(r.WorkingDirectory, cwd))))
             throw new IOException("Session is already owned by a running CLI. Read, stop, or take control of it first.");
     }
-    private async Task<CliSessionRecord> Start(Account account, string cwd, string? threadId)
+    private static bool Visible(JsonElement args) => !args.TryGetProperty("visible", out var visible) || visible.GetBoolean();
+    private void ValidateTerminal(string? threadId, string cwd, string? text)
+        => CodexProcessLauncher.BuildScript("codex", repository.Root, cwd, threadId is null ? CodexAction.Open : CodexAction.Resume,
+            settings().DefaultCodexHome, threadId, text, threadId is null ? null : RolloutStatus.LastContext(settings().DefaultCodexHome, threadId));
+    private async Task<CliSessionRecord> Start(Account account, string cwd, string? threadId, bool visible = false, string? text = null)
     {
         if (!Directory.Exists(cwd)) throw new IOException("Working directory unavailable.");
         var deps = await dependencies();
         if (deps.NativeCodex is null) throw new IOException("Native Codex CLI unavailable.");
         new CodexProfileService(repository.Root, new JunctionService()).PrepareSharedStore(account, settings());
+        if (visible)
+        {
+            ValidateTerminal(threadId, cwd, text);
+            CliSessionRecord? terminal = null;
+            launcher.OnLaunched = (process, id, directory, thread) => terminal = runtime.Track(process, id, directory, thread, "terminal");
+            launcher.Launch(deps, account.Id, PathSafety.Profile(repository.Root, account), cwd,
+                threadId is null ? CodexAction.Open : CodexAction.Resume, settings().DefaultCodexHome, threadId, text,
+                threadId is null ? null : RolloutStatus.LastContext(settings().DefaultCodexHome, threadId));
+            return terminal ?? throw new IOException("Terminal identity unavailable. Inspect registry before retrying.");
+        }
         var record = new CliSessionRecord { AccountId = account.Id, WorkingDirectory = cwd, ThreadId = threadId };
         runtime.Save(record);
         var info = new ProcessStartInfo(executable) { UseShellExecute = true, WindowStyle = ProcessWindowStyle.Hidden, WorkingDirectory = repository.Root };
@@ -161,6 +180,9 @@ public sealed class ManagerAutomation
         if (record.Mode == "terminal") SessionRuntime.StopTerminal(record);
         else
         {
+            var state = runtime.ReadState(record, settings().DefaultCodexHome);
+            if (CodexThreadReader.Text(state, "status") is "completed" or "failed" or "stopped")
+            { SessionRuntime.StopVerified(record); return; }
             await AutomationPipe.Call(AutomationPipe.Name(repository.Root, "session-" + record.Id), "stop", new { });
             var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
             while (SessionRuntime.Alive(record) && DateTimeOffset.UtcNow < deadline) await Task.Delay(100);

@@ -20,10 +20,10 @@ try {
         return $response.result
     }
     $hello = Request @{jsonrpc='2.0';id=1;method='initialize';params=@{protocolVersion='2025-11-25';capabilities=@{};clientInfo=@{name='manager-smoke';version='1'}}}
-    if ($hello.serverInfo.version -ne '1.11.0') { throw 'Wrong Manager release.' }
+    if ($hello.serverInfo.version -ne '1.11.1') { throw 'Wrong Manager release.' }
     $process.StandardInput.WriteLine('{"jsonrpc":"2.0","method":"notifications/initialized"}'); $process.StandardInput.Flush()
     $tools = Request @{jsonrpc='2.0';id=2;method='tools/list';params=@{}}
-    if ($tools.tools.Count -ne 15 -or @($tools.tools.name | Where-Object { $_ -match 'reset|credit|delete|auth' }).Count -gt 0) { throw 'Unexpected exposed tools.' }
+    if ($tools.tools.Count -ne 16 -or @($tools.tools.name | Where-Object { $_ -match 'reset|credit|delete|auth' }).Count -gt 0) { throw 'Unexpected exposed tools.' }
     $health = Request @{jsonrpc='2.0';id=3;method='tools/call';params=@{name='manager_health';arguments=@{}}}
     if ($health.isError -or -not $health.structuredContent.supportsLockedDesktop) { throw 'Bridge health failed.' }
     $accounts = Request @{jsonrpc='2.0';id=4;method='tools/call';params=@{name='accounts_list';arguments=@{}}}

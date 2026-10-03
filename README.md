@@ -7,15 +7,25 @@ Từ **v1.11.0**, app có MCP điều khiển quota và phiên CLI qua stdio/nam
 Không cần computer-use hoặc mở khóa màn hình. Khi GUI đóng, bridge chạy nền; máy vẫn cần bật và không sleep.
 Cài bằng `pwsh -File ./scripts/install-mcp.ps1`.
 
-MCP `codex_account_manager` có 15 tools: `manager_health`, `accounts_list`, `account_refresh`,
-`projects_list`, `sessions_list`, `session_read`, `session_start`, `session_resume`, `session_take_control`,
-`session_switch_account`, `session_send`, `session_steer`, `session_interrupt`, `session_stop`, `session_reply`.
-`sessionId` là ID Manager trả về; `threadId` là ID hội thoại Codex, giữ nguyên khi đổi tài khoản.
-`session_resume` không gửi model turn nếu chưa truyền `text`. Dùng `session_send` cho phiên rảnh;
-phiên đang chạy dùng `session_steer`. Yêu cầu duyệt được trả về để người gọi xử lý, không tự duyệt.
+**v1.11.1:** MCP mở/resume/đổi tài khoản bằng terminal tương tác mặc định (`visible=true`).
+Truyền `text="tiếp tục"` để CLI nhận prompt ngay khi mở; sau đó nhập trực tiếp trong terminal.
+Màn hình khóa không ngăn MCP đọc quota/log hoặc mở và dừng tiến trình; terminal hiển thị khi mở khóa.
+`visible=false` chọn worker app-server khi cần gửi/steer/approval bằng API.
 
-CLI mở từ giao diện vẫn là terminal tương tác. MCP đọc/dừng được phiên đã nhận diện; dùng
-`session_take_control` để ngắt và chuyển cùng hội thoại sang CLI app-server trước khi gửi/steer bằng API.
+Nút **Sessions** hiển thị các phiên, PID, trạng thái và nội dung trả lời cuối.
+**Open terminal** chuyển cùng hội thoại/tài khoản từ worker nền sang terminal, không gửi prompt khi chưa nhập `text`.
+**Stop** dừng phiên đã chọn; nếu worker đang chạy không phản hồi thì có **Force stop** để chọn riêng.
+Đóng Sessions không dừng job. Khi Resume gặp phiên còn sống, app mở Sessions thay cho báo lỗi.
+Có thể mở riêng cửa sổ bằng `CodexAccountManager.exe --sessions`.
+Bản mới dưới `versions/<version>/` dùng chung dữ liệu ở thư mục portable cha.
+
+MCP `codex_account_manager` có 16 tools: `manager_health`, `accounts_list`, `account_refresh`,
+`projects_list`, `sessions_list`, `session_read`, `session_start`, `session_resume`, `session_take_control`,
+`session_switch_account`, `session_open_terminal`, `session_send`, `session_steer`, `session_interrupt`, `session_stop`, `session_reply`.
+`sessionId` là ID Manager; `threadId` là ID hội thoại Codex, giữ nguyên khi đổi tài khoản.
+`session_resume` không gửi model turn nếu chưa truyền `text`.
+`session_send`, `session_steer`, `session_reply` áp dụng cho worker app-server; terminal nhận bàn phím trực tiếp.
+`session_take_control` chuyển terminal sang app-server, cần được người dùng cho phép vì ngắt công việc hiện tại.
 Không cần chuyển job đang chạy để đọc quota. `session_switch_account` xác minh quota đích trước khi dừng nguồn;
 truyền `excludeLastAccount=true`, `excludedAccountIds`, `minimumRemainingPercent` theo chính sách job.
 Mặc định chỉ chuyển khi quota nguồn cạn. MCP không có thao tác dùng reset credits, xóa tài khoản hoặc Apply auth.

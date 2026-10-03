@@ -119,13 +119,37 @@ public sealed class CodexProcessLauncher
 {
     private readonly Dictionary<string, List<Process>> terminals = [];
     public Action<Process, string, string, string?>? OnLaunched { get; set; }
-    public static string BuildScript(string codex, string home, string workingDirectory, CodexAction action, string sharedHome, string? sessionId = null)
+    public static string BuildScript(string codex, string home, string workingDirectory, CodexAction action, string sharedHome, string? sessionId = null, string? initialPrompt = null, System.Text.Json.JsonElement? context = null)
     {
         if (sessionId is not null && (action != CodexAction.Resume || !Guid.TryParse(sessionId, out _)))
             throw new IOException("Invalid resume session ID.");
         var args = action switch { CodexAction.Login => " login", CodexAction.Resume => " resume --all", _ => "" };
         var cwd = SessionProjectCatalog.NormalizeWorkingDirectory(workingDirectory);
         if (sessionId is not null) args += " " + ShellRunner.Quote(sessionId) + " --cd " + ShellRunner.Quote(cwd);
+        if (context is { } saved)
+        {
+            if (CodexThreadReader.Text(saved, "model") is { } model) args += " --model " + ShellRunner.Quote(model);
+            if (CodexThreadReader.Text(saved, "effort") is { } effort) args += " -c " + ShellRunner.Quote("model_reasoning_effort=" + System.Text.Json.JsonSerializer.Serialize(effort));
+            if (saved.TryGetProperty("approval_policy", out var approval))
+            {
+                if (approval.ValueKind != System.Text.Json.JsonValueKind.String) throw new IOException("Saved approval policy cannot be represented in a terminal.");
+                args += " --ask-for-approval " + ShellRunner.Quote(approval.GetString()!);
+            }
+            if (saved.TryGetProperty("sandbox_policy", out var sandbox))
+            {
+                _ = ManagedCliHost.SandboxOverride(sandbox);
+                var type = CodexThreadReader.Text(sandbox, "type")!;
+                args += " --sandbox " + ShellRunner.Quote(type);
+                if (type == "workspace-write")
+                    foreach (var key in new[] { "network_access", "writable_roots", "exclude_tmpdir_env_var", "exclude_slash_tmp" })
+                        if (sandbox.TryGetProperty(key, out var value)) args += " -c " + ShellRunner.Quote("sandbox_workspace_write." + key + "=" + value.GetRawText());
+            }
+        }
+        if (initialPrompt is not null)
+        {
+            if (action == CodexAction.Login || action == CodexAction.Resume && sessionId is null) throw new IOException("Initial prompt requires Open or an exact stored thread.");
+            args += " -- " + ShellRunner.Quote(initialPrompt);
+        }
         var clear = string.Join("; ", ShellRunner.IsolatedEnvironmentVariables.Select(k => "Remove-Item Env:" + k + " -ErrorAction SilentlyContinue"));
         var shared = PathSafety.Canonical(sharedHome);
         var sqliteOverride = ShellRunner.Quote("sqlite_home=" + System.Text.Json.JsonSerializer.Serialize(shared));
@@ -139,7 +163,7 @@ public sealed class CodexProcessLauncher
             + (action == CodexAction.Login ? "; if ($? -and $LASTEXITCODE -eq 0) { exit 0 }" : "");
     }
 
-    public void Launch(Dependencies dependencies, string id, string home, string workingDirectory, CodexAction action, string sharedHome, string? sessionId = null)
+    public void Launch(Dependencies dependencies, string id, string home, string workingDirectory, CodexAction action, string sharedHome, string? sessionId = null, string? initialPrompt = null, System.Text.Json.JsonElement? context = null)
     {
         dependencies.Require();
         workingDirectory = SessionProjectCatalog.NormalizeWorkingDirectory(workingDirectory);
@@ -148,7 +172,7 @@ public sealed class CodexProcessLauncher
             WorkingDirectory = workingDirectory, WindowStyle = ProcessWindowStyle.Normal };
         info.ArgumentList.Add("-NoLogo"); info.ArgumentList.Add("-NoProfile"); info.ArgumentList.Add("-NoExit");
         info.ArgumentList.Add("-EncodedCommand");
-        info.ArgumentList.Add(ShellRunner.Encode(BuildScript(dependencies.Codex!, home, workingDirectory, action, sharedHome, sessionId)));
+        info.ArgumentList.Add(ShellRunner.Encode(BuildScript(dependencies.Codex!, home, workingDirectory, action, sharedHome, sessionId, initialPrompt, context)));
         var process = Process.Start(info) ?? throw new IOException("Unable to open the terminal.");
         if (!terminals.TryGetValue(id, out var list)) terminals[id] = list = [];
         list.Add(process);

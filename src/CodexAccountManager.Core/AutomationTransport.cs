@@ -51,9 +51,10 @@ public sealed class AutomationPipe : IDisposable
                 var args = request.RootElement.TryGetProperty("arguments", out var value) ? value.Clone() : JsonSerializer.SerializeToElement(new { });
                 object response;
                 try { response = new { result = await handle(method, args) }; }
-                catch (Exception ex) when (ex is IOException or ArgumentException or InvalidOperationException or TimeoutException
-                    or System.ComponentModel.Win32Exception or JsonException or OperationCanceledException or KeyNotFoundException)
-                { response = new { error = AutomationErrors.Safe(ex) }; }
+                catch (Exception ex)
+                { response = new { error = ex is IOException or ArgumentException or InvalidOperationException or TimeoutException
+                    or System.ComponentModel.Win32Exception or JsonException or OperationCanceledException or KeyNotFoundException
+                    ? AutomationErrors.Safe(ex) : "Unexpected operation error (" + ex.GetType().Name + "). Re-read session state before retrying." }; }
                 await writer.WriteLineAsync(JsonSerializer.Serialize(response, Json));
             }
             catch (Exception ex) when (ex is IOException or OperationCanceledException or JsonException) { }

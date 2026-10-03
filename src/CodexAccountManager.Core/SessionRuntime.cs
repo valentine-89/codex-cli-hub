@@ -122,27 +122,49 @@ public sealed class SessionRuntime(string root)
         }
     }
     public object Read(CliSessionRecord record, string sharedHome)
+        => new { session = record, alive = Alive(record), state = ReadState(record, sharedHome) };
+    public JsonElement ReadState(CliSessionRecord record, string sharedHome)
     {
+        var rollout = JsonSerializer.SerializeToElement(RolloutStatus.Read(sharedHome, record.ThreadId), AutomationPipe.Json);
         if (record.Mode == "managed")
         {
             var path = PathFor(record.Id, ".state.json");
             if (File.Exists(path))
             {
                 using var doc = JsonDocument.Parse(File.ReadAllText(path));
-                return new { session = record, alive = Alive(record), state = doc.RootElement.Clone() };
+                var state = doc.RootElement.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.Clone());
+                var liveTime = CodexThreadReader.Text(rollout, "lastEventAt");
+                var cachedTime = CodexThreadReader.Text(doc.RootElement, "lastEventAt");
+                if (DateTimeOffset.TryParse(liveTime, out var latest)
+                    && (!DateTimeOffset.TryParse(cachedTime, out var cached) || latest > cached))
+                {
+                    state["lastEventAt"] = rollout.GetProperty("lastEventAt").Clone();
+                    var status = CodexThreadReader.Text(rollout, "status");
+                    if (status is "active" or "completed" or "failed" or "interrupted") state["status"] = rollout.GetProperty("status").Clone();
+                    foreach (var (source, target) in new[] { ("finalMessage", "lastMessage"), ("error", "error"), ("rateLimits", "rateLimits") })
+                        if (rollout.TryGetProperty(source, out var value) && value.ValueKind != JsonValueKind.Null) state[target] = value.Clone();
+                }
+                return JsonSerializer.SerializeToElement(state, AutomationPipe.Json);
             }
         }
-        return new { session = record, alive = Alive(record), state = RolloutStatus.Read(sharedHome, record.ThreadId) };
+        return rollout;
+    }
+    public static void StopVerified(CliSessionRecord record)
+    {
+        if (record.Mode is not ("managed" or "terminal") || !Alive(record)) throw new IOException("Session process identity changed or is no longer running.");
+        using var process = Process.GetProcessById(record.ProcessId);
+        // Recheck the opened process, including its creation time, immediately before kill.
+        if (process.StartTime.ToUniversalTime().Ticks != record.ProcessStartedTicks
+            || !PathSafety.Same(process.MainModule!.FileName, record.Executable!)) throw new IOException("Session identity changed.");
+        process.Kill(entireProcessTree: true);
+        if (!process.WaitForExit(10000)) throw new IOException("Session did not stop. No replacement was started.");
     }
     public static void StopTerminal(CliSessionRecord record)
     {
         if (record.Mode != "terminal" || !Alive(record)) throw new IOException("Terminal process identity changed or is no longer running.");
-        using var process = Process.GetProcessById(record.ProcessId);
         // Registry identity and creation time were verified immediately before terminating
         // the Manager-owned wrapper, never the shared Windows Terminal process.
-        process.Kill(entireProcessTree: true);
-        process.WaitForExit(10000);
-        if (!process.HasExited) throw new IOException("Terminal did not stop. No replacement was started.");
+        StopVerified(record);
     }
 }
 
@@ -187,8 +209,13 @@ public static class RolloutStatus
                 switch (CodexThreadReader.Text(payload, "type"))
                 {
                     case "token_count": if (payload.TryGetProperty("rate_limits", out var quota)) limits = quota.Clone(); break;
-                    case "task_started": status = "active"; break;
-                    case "task_complete": case "task_completed": status = "completed"; final = CodexThreadReader.Text(payload, "last_agent_message"); break;
+                    case "task_started": status = "active"; error = null; final = null; break;
+                    case "task_complete": case "task_completed":
+                        final = CodexThreadReader.Text(payload, "last_agent_message");
+                        if (payload.TryGetProperty("error", out var failure) && failure.ValueKind != JsonValueKind.Null)
+                        { status = "failed"; error = failure.ValueKind == JsonValueKind.Object ? CodexThreadReader.Text(failure, "message") ?? "Turn failed." : "Turn failed."; }
+                        else { status = string.IsNullOrWhiteSpace(final) ? "idle" : "completed"; error = null; }
+                        break;
                     case "turn_aborted": status = "interrupted"; break;
                     case "error": status = "failed"; error = CodexThreadReader.Text(payload, "message"); break;
                 }
@@ -202,11 +229,18 @@ public static class RolloutStatus
     public static string[] Tail(string path)
     {
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-        var skipped = stream.Length > 1024 * 1024;
-        if (skipped) stream.Seek(-1024 * 1024, SeekOrigin.End);
-        using var reader = new StreamReader(stream);
-        if (skipped) _ = reader.ReadLine();
-        return reader.ReadToEnd().Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        var length = stream.Length;
+        var size = (int)Math.Min(length, 1024 * 1024);
+        stream.Seek(length - size, SeekOrigin.Begin);
+        var bytes = new byte[size];
+        var count = 0;
+        while (count < size)
+        { var read = stream.Read(bytes, count, size - count); if (read == 0) break; count += read; }
+        var text = Encoding.UTF8.GetString(bytes, 0, count);
+        if (length > size) { var newline = text.IndexOf('\n'); text = newline < 0 ? "" : text[(newline + 1)..]; }
+        // Discard an incomplete final record while the CLI is writing it.
+        var end = text.LastIndexOf('\n');
+        return end < 0 ? [] : text[..end].Split('\n', StringSplitOptions.RemoveEmptyEntries);
     }
     public static JsonElement? LastContext(string sharedHome, string? threadId)
     {

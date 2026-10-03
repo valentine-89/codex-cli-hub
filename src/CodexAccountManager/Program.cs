@@ -11,13 +11,29 @@ internal static class Program
     private static void Main(string[] args)
     {
         var rootIndex = Array.IndexOf(args, "--root");
-        var root = rootIndex >= 0 && rootIndex + 1 < args.Length ? args[rootIndex + 1] : AppContext.BaseDirectory;
+        var root = rootIndex >= 0 && rootIndex + 1 < args.Length ? args[rootIndex + 1] : DefaultRoot();
         var background = args.Any(a => a is "--mcp" or "--call" or "--automation-host" or "--session-host");
         try
         {
             var repository = new AccountRepository(root);
             if (background) { RunBackground(repository, args).GetAwaiter().GetResult(); return; }
             ApplicationConfiguration.Initialize();
+            var sessionsIndex = Array.IndexOf(args, "--sessions");
+            if (sessionsIndex >= 0)
+            {
+                var selected = sessionsIndex + 1 < args.Length && Guid.TryParseExact(args[sessionsIndex + 1], "N", out _)
+                    ? args[sessionsIndex + 1] : null;
+                using var sessions = new SessionsForm(repository, selected);
+                if (args.Contains("--smoke-test"))
+                    sessions.Shown += async (_, _) =>
+                    {
+                        await sessions.Ready;
+                        using var bitmap = new Bitmap(sessions.Width, sessions.Height);
+                        sessions.DrawToBitmap(bitmap, new Rectangle(0, 0, sessions.Width, sessions.Height));
+                        bitmap.Save(Path.Combine(repository.Root, "smoke-sessions.png")); sessions.Close();
+                    };
+                Application.Run(sessions); return;
+            }
             using var appLock = AcquireUiLock(repository);
             using var form = new MainForm(repository);
             if (args.Contains("--smoke-test"))
@@ -40,6 +56,14 @@ internal static class Program
                 "Codex Account Manager", MessageBoxButtons.OK, MessageBoxIcon.Error);
             Environment.ExitCode = 1;
         }
+    }
+    private static string DefaultRoot()
+    {
+        var versionFolder = new DirectoryInfo(AppContext.BaseDirectory);
+        var versions = versionFolder.Parent;
+        if (versions?.Name == "versions" && versions.Parent is { } portable
+            && File.Exists(Path.Combine(portable.FullName, "settings.json"))) return portable.FullName;
+        return AppContext.BaseDirectory;
     }
     private static FileStream AcquireUiLock(AccountRepository repository)
     {

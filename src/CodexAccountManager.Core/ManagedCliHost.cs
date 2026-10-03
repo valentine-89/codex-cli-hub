@@ -53,7 +53,7 @@ public sealed class ManagedCliHost : IDisposable
                 ?? throw new IOException("Could not start the managed Codex CLI.");
             _ = Drain(process.StandardError);
             _ = Receive();
-            await Request("initialize", new { clientInfo = new { name = "codex_account_manager", title = "Codex Account Manager", version = "1.11.0" },
+            await Request("initialize", new { clientInfo = new { name = "codex_account_manager", title = "Codex Account Manager", version = "1.11.1" },
                 capabilities = new { experimentalApi = true } });
             await Send(new { method = "initialized", @params = new { } });
             var resume = new Dictionary<string, object?> { ["cwd"] = record.WorkingDirectory };

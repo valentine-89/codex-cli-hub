@@ -1,4 +1,10 @@
-# Validation — v1.11.0, 2026-10-03
+# Validation — v1.11.1, 2026-10-03
+- 62 regression cases cover stale managed snapshots versus bounded complete rollout records, quota errors, process creation-time ownership, native Unicode/multiline/shell-character prompt arguments, and retained model/effort/approval/sandbox flags.
+- MCP inventory now exposes 16 tools, including session_open_terminal. No reset/credits/auth mutation is exposed.
+- Live release checks verify the same data root, stdio handshake, session identity and visible native terminal; no new design prompt is submitted to the completed medication-dispenser job.
+- Keyboard entry in the interactive terminal and visibility after unlocking are manual acceptance. Locked-desktop operation depends on the computer remaining awake.
+
+## Previous validation — v1.11.0, 2026-10-03
 
 - **60/60 .NET tests passed**, including permission restoration, persistent managed CLI protocol,
   pending approvals, steering, interrupt, stop, schema validation, quota eligibility and process identity.
@@ -140,9 +146,9 @@ then reopen Codex. It was intentionally not performed on the actual default acco
 Public source and release: https://github.com/valentine-89/codex-cli-hub
 Release ZIP contains only the executable; local profiles and account metadata are excluded.
 
-## Executable SHA-256
+## Current executable SHA-256
 ```text
-233A2B84723BE2845D95562A93E025BFE8B075107297046127A926CE9FB82C4F
+979CCCACEE052DF4300CA50B95964735E5EC2B2AE2AB3FD1FE8537B634BB57F4
 ```
 
 Protocol source: https://learn.chatgpt.com/docs/app-server

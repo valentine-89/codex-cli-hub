@@ -1,6 +1,9 @@
 using CodexAccountManager.Core;
 using System.Text.Json;
 
+if (args.Contains("--echo-arguments"))
+{ Console.OutputEncoding = new System.Text.UTF8Encoding(false); Console.Write(JsonSerializer.Serialize(args)); return 0; }
+
 if (args.Contains("exec"))
 {
     if (!args.Contains("--ephemeral") || !args.Contains("--ignore-user-config") || !args.Contains("reply \"OK\"")
@@ -756,6 +759,19 @@ tests.Add(("PowerShell argument quoting and process environment isolation", asyn
         var resumeScript = CodexProcessLauncher.BuildScript(fake, special, special, CodexAction.Resume, f.Settings.DefaultCodexHome, sessionId);
         var resumed = await ShellRunner.RunAsync(deps.PowerShell!, resumeScript, special);
         Assert(resumed.ExitCode == 0 && resumed.Output.Contains("resume|--all|" + sessionId + "|--cd|" + special), "Exact session ID or cwd override lost");
+        var prompt = "--tiếp tục ' $() &\nDòng hai";
+        using var context = JsonDocument.Parse("{\"model\":\"fixture-model\",\"effort\":\"high\",\"approval_policy\":\"never\",\"sandbox_policy\":{\"type\":\"danger-full-access\"}}");
+        var prompted = await ShellRunner.RunAsync(deps.PowerShell!, CodexProcessLauncher.BuildScript(fake, special, special,
+            CodexAction.Resume, f.Settings.DefaultCodexHome, sessionId, prompt, context.RootElement), special);
+        Assert(prompted.ExitCode == 0 && prompted.Output.Contains("|" + prompt)
+            && prompted.Output.Contains("|--model|fixture-model") && prompted.Output.Contains("|--ask-for-approval|never")
+            && prompted.Output.Contains("|--sandbox|danger-full-access"), "Prompt quoting or saved policy lost");
+        using var nativeContext = JsonDocument.Parse("{\"model\":\"--echo-arguments\"}");
+        var native = await ShellRunner.RunAsync(deps.PowerShell!, CodexProcessLauncher.BuildScript(Environment.ProcessPath!, special, special,
+            CodexAction.Resume, f.Settings.DefaultCodexHome, sessionId, prompt, nativeContext.RootElement), special);
+        using var nativeArgs = JsonDocument.Parse(native.Output);
+        Assert(native.ExitCode == 0 && nativeArgs.RootElement.EnumerateArray().Last().GetString() == prompt
+            && nativeArgs.RootElement.EnumerateArray().Select(a => a.GetString()).Contains("--"), "Native prompt argument or separator lost");
         Reject(() => CodexProcessLauncher.BuildScript(fake, special, special, CodexAction.Resume, f.Settings.DefaultCodexHome, "bad'; exit 99"));
         Assert(Environment.GetEnvironmentVariable("CODEX_HOME") == original, "Parent environment changed");
     }
@@ -928,6 +944,38 @@ Test("saved permission policy retains writable roots, network and temp exclusion
     Assert(!mapped.GetProperty("networkAccess").GetBoolean() && mapped.GetProperty("excludeTmpdirEnvVar").GetBoolean() && mapped.GetProperty("excludeSlashTmp").GetBoolean(), "Sandbox policy weakened");
     using var unknown = JsonDocument.Parse("{\"type\":\"unsupported\"}"); Reject(() => ManagedCliHost.SandboxOverride(unknown.RootElement));
 });
+Test("rollout completion corrects stale managed state and does not treat quota failure as success", () =>
+{
+    var f = Fixture(); var runtime = new SessionRuntime(f.App);
+    var record = new CliSessionRecord { ThreadId = Guid.NewGuid().ToString(), WorkingDirectory = f.App };
+    var day = Path.Combine(f.Shared, "2026", "10", "03"); Directory.CreateDirectory(day);
+    var path = Path.Combine(day, "rollout-" + record.ThreadId + ".jsonl");
+    runtime.Save(record);
+    runtime.Write(runtime.PathFor(record.Id, ".state.json"), new { status = "active", lastEventAt = "2026-10-03T00:00:00Z", lastMessage = (string?)null, pendingRequests = new object[0] });
+    File.WriteAllText(path, JsonSerializer.Serialize(new { timestamp = "2026-10-03T01:00:00Z", type = "event_msg",
+        payload = new { type = "task_complete", last_agent_message = "Finished package", error = (object?)null } }) + "\n");
+    var state = runtime.ReadState(record, f.Settings.DefaultCodexHome);
+    Assert(state.GetProperty("status").GetString() == "completed" && state.GetProperty("lastMessage").GetString() == "Finished package", "Completion remained active");
+    File.WriteAllText(path, JsonSerializer.Serialize(new { timestamp = "2026-10-03T01:00:00Z", type = "event_msg",
+        payload = new { type = "task_complete", last_agent_message = (string?)null, error = new { message = "Usage limit", codex_error_info = "usage_limit_exceeded" } } }) + "\n");
+    state = runtime.ReadState(record, f.Settings.DefaultCodexHome);
+    Assert(state.GetProperty("status").GetString() == "failed" && state.GetProperty("error").GetString() == "Usage limit", "Quota failure counted as completion");
+    File.AppendAllText(path, "{\"timestamp\":\"2026-10-03T02:00:00Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"task_started\"}}\n{\"incomplete\":");
+    state = runtime.ReadState(record, f.Settings.DefaultCodexHome);
+    Assert(state.GetProperty("status").GetString() == "active", "New turn or incomplete record broke state");
+});
+Test("bounded rollout reads ignore partial records and verified stop rejects reused identity", () =>
+{
+    var f = Fixture(); var path = Path.Combine(f.App, "large.jsonl");
+    File.WriteAllText(path, new string('x', 1200000) + "\n{\"complete\":true}\n{\"partial\":");
+    var tail = RolloutStatus.Tail(path);
+    Assert(tail.Length == 1 && tail[0] == "{\"complete\":true}", "Unbounded or incomplete tail");
+    using var current = System.Diagnostics.Process.GetCurrentProcess();
+    var record = new SessionRuntime(f.App).Track(current, "account", f.App, null, "managed");
+    record.ProcessStartedTicks--;
+    Reject(() => SessionRuntime.StopVerified(record));
+    Assert(!current.HasExited, "Unverified process was stopped");
+});
 tests.Add(("MCP stdio handshake and tool errors remain valid JSON-RPC", async () =>
 {
     var input = new StringReader("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\"}}\n{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}\n{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"reset_credits\",\"arguments\":{}}}\n");
@@ -936,17 +984,20 @@ tests.Add(("MCP stdio handshake and tool errors remain valid JSON-RPC", async ()
     var lines = output.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);
     Assert(lines.Length == 3, "Notification produced a response or protocol request was lost");
     using var tools = System.Text.Json.JsonDocument.Parse(lines[1]);
-    Assert(tools.RootElement.GetProperty("result").GetProperty("tools").GetArrayLength() == 15, "Tool inventory incomplete");
+    Assert(tools.RootElement.GetProperty("result").GetProperty("tools").GetArrayLength() == 16, "Tool inventory incomplete");
     using var error = System.Text.Json.JsonDocument.Parse(lines[2]);
     Assert(error.RootElement.GetProperty("result").GetProperty("isError").GetBoolean(), "Unknown mutation was accepted");
 }));
 tests.Add(("current-user pipe request survives without an interactive desktop", async () =>
 {
     var f = Fixture(); var name = AutomationPipe.Name(f.App, "fixture");
-    using var host = new AutomationPipe(name, (method, arguments) => Task.FromResult<object>(new { method, arguments }));
+    using var host = new AutomationPipe(name, (method, arguments) => method == "unexpected"
+        ? throw new NotSupportedException("private fixture detail") : Task.FromResult<object>(new { method, arguments }));
     host.Start();
     var result = await AutomationPipe.Call(name, "read", new { text = "Thuốc tiếng Việt" });
     Assert(result.GetProperty("arguments").GetProperty("text").GetString() == "Thuốc tiếng Việt", "Unicode or pipe routing lost");
+    try { await AutomationPipe.Call(name, "unexpected", new { }); throw new Exception("Unexpected error was accepted"); }
+    catch (IOException ex) { Assert(ex.Message.Contains("NotSupportedException") && !ex.Message.Contains("private fixture detail"), "Unknown failure closed the pipe or leaked details"); }
 }));
 tests.Add(("managed CLI resume, send, approval, steer, interrupt and stop use persistent protocol", async () =>
 {

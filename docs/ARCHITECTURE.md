@@ -106,3 +106,8 @@ the shared sessions directory.
 Source control excludes all runtime account data. Release ZIPs use an explicit allowlist:
 exactly `CodexAccountManager.exe`. Public documentation remains on GitHub. Never zip a used portable directory wholesale.
 The .NET apphost provides a runtime download dialog when the required desktop runtime is absent.
+
+## Interactive MCP sessions (1.11.1)
+MCP start/resume/switch defaults to a visible PowerShell 7 terminal and passes `text` once as a quoted positional CLI prompt after `--`. Native TUI owns subsequent keyboard input. The Manager retains process identity, account, cwd and exact stored thread; quota and bounded rollout reads require no desktop access. Explicit `visible=false` selects the independent app-server host for full protocol control.
+`session_open_terminal` validates the target profile, history and representable saved context before stopping the old owner, then opens the same thread/account. Active transfers interrupt current work and require caller authorization. A live terminal is reused rather than duplicated. Saved model, effort, approval and sandbox settings are supplied to the CLI command.
+Sessions is a separate viewer with Open terminal/Stop and an explicit Force stop after graceful shutdown fails. Closing it does not close workers. A versioned executable can share the parent portable data root. The release promotion helper waits for all users of the original executable to exit; it never terminates sessions.
