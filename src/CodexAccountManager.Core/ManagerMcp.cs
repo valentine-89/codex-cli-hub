@@ -54,7 +54,7 @@ public static class ManagerMcp
                     // protocol version; only the stable tools capability is advertised.
                     var version = request.GetProperty("params").GetProperty("protocolVersion").GetString();
                     result = new { protocolVersion = version, capabilities = new { tools = new { listChanged = false } },
-                        serverInfo = new { name = "codex-account-manager", version = "1.11.1" } };
+                        serverInfo = new { name = "codex-account-manager", version = "1.11.2" } };
                 }
                 else if (method == "ping") result = new { };
                 else if (!initialized) throw new IOException("Not initialized.");

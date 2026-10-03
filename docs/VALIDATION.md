@@ -10,6 +10,8 @@
   rejected without saving a live session. Wrong executable paths and changed creation times still
   reject stopping the process. Existing profile, UI, quoting, MCP and session tests remain passing.
 - Physical user interaction with a newly created real chat remains separate from these synthetic tests.
+- Initial local deployment opened the new GUI and preserved the existing CLI terminal and MCP client.
+  All 15 checked account/settings/auth/config files retained their pre-deployment SHA-256 hashes.
 
 ## Previous validation — v1.11.1, 2026-10-03
 - 62 regression cases cover stale managed snapshots versus bounded complete rollout records, quota errors, process creation-time ownership, native Unicode/multiline/shell-character prompt arguments, and retained model/effort/approval/sandbox flags.
