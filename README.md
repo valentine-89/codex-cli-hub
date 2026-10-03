@@ -7,6 +7,9 @@ Từ **v1.11.0**, app có MCP điều khiển quota và phiên CLI qua stdio/nam
 Không cần computer-use hoặc mở khóa màn hình. Khi GUI đóng, bridge chạy nền; máy vẫn cần bật và không sleep.
 Cài bằng `pwsh -File ./scripts/install-mcp.ps1`.
 
+**v1.11.2:** sửa lỗi `Object reference not set to an instance of an object` khi mở phiên mới.
+Nhận diện terminal/worker ngay lúc khởi động, kể cả trước khi Windows khởi tạo danh sách module.
+
 **v1.11.1:** MCP mở/resume/đổi tài khoản bằng terminal tương tác mặc định (`visible=true`).
 Truyền `text="tiếp tục"` để CLI nhận prompt ngay khi mở; sau đó nhập trực tiếp trong terminal.
 Màn hình khóa không ngăn MCP đọc quota/log hoặc mở và dừng tiến trình; terminal hiển thị khi mở khóa.

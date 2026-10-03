@@ -67,15 +67,27 @@ public sealed class SessionRuntime(string root)
         {
             using var process = Process.GetProcessById(record.ProcessId);
             return !process.HasExited && process.StartTime.ToUniversalTime().Ticks == record.ProcessStartedTicks
-                && PathSafety.Same(process.MainModule!.FileName, record.Executable);
+                && PathSafety.Same(ProcessIdentity.Executable(process), record.Executable);
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception) { return false; }
     }
     public CliSessionRecord Track(Process process, string accountId, string cwd, string? threadId, string mode)
     {
-        var record = new CliSessionRecord { AccountId = accountId, WorkingDirectory = cwd, ThreadId = threadId, Mode = mode,
-            ProcessId = process.Id, ProcessStartedTicks = process.StartTime.ToUniversalTime().Ticks, Executable = process.MainModule!.FileName };
-        Save(record); return record;
+        var record = new CliSessionRecord { AccountId = accountId, WorkingDirectory = cwd, ThreadId = threadId, Mode = mode };
+        RegisterProcess(process, record); return record;
+    }
+    public void RegisterProcess(Process process, CliSessionRecord record)
+    {
+        try
+        {
+            var executable = ProcessIdentity.Executable(process);
+            var started = process.StartTime.ToUniversalTime().Ticks;
+            if (process.HasExited) throw new InvalidOperationException("Session process has exited.");
+            record.ProcessId = process.Id; record.ProcessStartedTicks = started; record.Executable = executable;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        { throw new IOException("Could not verify the launched session process. Check the opened terminal before retrying.", ex); }
+        Save(record);
     }
     // Import only launches whose parent is this exact portable Manager executable and whose
     // generated script matches a registered isolated profile. No arbitrary PID adoption tool.
@@ -155,7 +167,7 @@ public sealed class SessionRuntime(string root)
         using var process = Process.GetProcessById(record.ProcessId);
         // Recheck the opened process, including its creation time, immediately before kill.
         if (process.StartTime.ToUniversalTime().Ticks != record.ProcessStartedTicks
-            || !PathSafety.Same(process.MainModule!.FileName, record.Executable!)) throw new IOException("Session identity changed.");
+            || !PathSafety.Same(ProcessIdentity.Executable(process), record.Executable!)) throw new IOException("Session identity changed.");
         process.Kill(entireProcessTree: true);
         if (!process.WaitForExit(10000)) throw new IOException("Session did not stop. No replacement was started.");
     }

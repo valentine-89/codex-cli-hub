@@ -1,4 +1,17 @@
-# Validation — v1.11.1, 2026-10-03
+# Validation — v1.11.2, 2026-10-03
+
+- **65/65 .NET tests passed**; Release build completed with zero warnings/errors.
+- Reproduced the reported launch race with 20 hidden PowerShell ShellExecute launches: 15 returned
+  a null `MainModule` immediately after reading `StartTime`, matching the former null dereference.
+- New deterministic tests create a hidden, suspended child before loader initialization, where module
+  enumeration is unavailable (null or Windows error 299). Terminal registration, liveness and verified
+  stop succeed through the kernel image query. No real conversation or account request is submitted.
+- Managed-worker registration preserves its preallocated registry ID and thread. An exited child is
+  rejected without saving a live session. Wrong executable paths and changed creation times still
+  reject stopping the process. Existing profile, UI, quoting, MCP and session tests remain passing.
+- Physical user interaction with a newly created real chat remains separate from these synthetic tests.
+
+## Previous validation — v1.11.1, 2026-10-03
 - 62 regression cases cover stale managed snapshots versus bounded complete rollout records, quota errors, process creation-time ownership, native Unicode/multiline/shell-character prompt arguments, and retained model/effort/approval/sandbox flags.
 - MCP inventory now exposes 16 tools, including session_open_terminal. No reset/credits/auth mutation is exposed.
 - Live release checks verify the same data root, stdio handshake, session identity and visible native terminal; no new design prompt is submitted to the completed medication-dispenser job.

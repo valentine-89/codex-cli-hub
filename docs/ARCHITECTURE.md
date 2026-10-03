@@ -111,3 +111,11 @@ The .NET apphost provides a runtime download dialog when the required desktop ru
 MCP start/resume/switch defaults to a visible PowerShell 7 terminal and passes `text` once as a quoted positional CLI prompt after `--`. Native TUI owns subsequent keyboard input. The Manager retains process identity, account, cwd and exact stored thread; quota and bounded rollout reads require no desktop access. Explicit `visible=false` selects the independent app-server host for full protocol control.
 `session_open_terminal` validates the target profile, history and representable saved context before stopping the old owner, then opens the same thread/account. Active transfers interrupt current work and require caller authorization. A live terminal is reused rather than duplicated. Saved model, effort, approval and sandbox settings are supplied to the CLI command.
 Sessions is a separate viewer with Open terminal/Stop and an explicit Force stop after graceful shutdown fails. Closing it does not close workers. A versioned executable can share the parent portable data root. The release promotion helper waits for all users of the original executable to exit; it never terminates sessions.
+
+## Process identity during startup (1.11.2)
+New PowerShell terminals and managed workers register through `SessionRuntime.RegisterProcess`.
+`Process.MainModule` may be null before the child initializes its loader. Image identity instead comes
+from [QueryFullProcessImageNameW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-queryfullprocessimagenamew)
+on the process handle; the executable path is never assumed from launch arguments. Liveness and stop
+checks use the same image query and still verify PID and creation time. A failed/exited registration
+does not write a live session or retry launching another process. The registry format is unchanged.

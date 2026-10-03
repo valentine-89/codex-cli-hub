@@ -156,8 +156,7 @@ public sealed class ManagerAutomation
         info.ArgumentList.Add("--root"); info.ArgumentList.Add(repository.Root);
         info.ArgumentList.Add("--session-host"); info.ArgumentList.Add(record.Id);
         using var process = Process.Start(info) ?? throw new IOException("Could not start session worker.");
-        record.ProcessId = process.Id; record.ProcessStartedTicks = process.StartTime.ToUniversalTime().Ticks; record.Executable = process.MainModule!.FileName;
-        runtime.Save(record);
+        runtime.RegisterProcess(process, record);
         var deadline = DateTimeOffset.UtcNow.AddSeconds(65);
         while (DateTimeOffset.UtcNow < deadline)
         {

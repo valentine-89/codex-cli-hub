@@ -936,6 +936,44 @@ Test("session runtime protects path traversal and reused process identity", () =
     record.ProcessStartedTicks--; Assert(!SessionRuntime.Alive(record), "Reused PID accepted");
     Reject(() => SessionRuntime.StopTerminal(record));
 });
+Test("new terminal is tracked and safely stopped before loader initialization", () =>
+{
+    var f = Fixture(); var runtime = new SessionRuntime(f.App);
+    using var child = new SuspendedProcess(f.App);
+    var moduleUnavailable = false;
+    try { moduleUnavailable = child.Process.MainModule is null; }
+    catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 299) { moduleUnavailable = true; }
+    Assert(moduleUnavailable, "Fixture did not reproduce the uninitialized loader");
+    var record = runtime.Track(child.Process, "account", f.App, null, "terminal");
+    Assert(PathSafety.Same(record.Executable!, child.Executable), "Incorrect executable identity");
+    Assert(runtime.Get(record.Id).ProcessId == child.Process.Id && SessionRuntime.Alive(record), "New terminal not registered as alive");
+    record.Executable = Environment.ProcessPath;
+    Assert(!SessionRuntime.Alive(record), "Wrong executable identity accepted");
+    Reject(() => SessionRuntime.StopVerified(record));
+    Assert(!child.Process.HasExited, "Child stopped with unverified executable identity");
+    record.Executable = child.Executable;
+    SessionRuntime.StopTerminal(record);
+    Assert(!SessionRuntime.Alive(record), "Stopped terminal reported alive");
+});
+Test("managed worker registration keeps its ID before loader initialization", () =>
+{
+    var f = Fixture(); var runtime = new SessionRuntime(f.App);
+    var record = new CliSessionRecord { AccountId = "account", WorkingDirectory = f.App, ThreadId = "00000000-0000-0000-0000-000000000003" };
+    runtime.Save(record);
+    using var child = new SuspendedProcess(f.App);
+    runtime.RegisterProcess(child.Process, record);
+    var saved = runtime.Get(record.Id);
+    Assert(runtime.List().Count == 1 && saved.ThreadId == record.ThreadId && SessionRuntime.Alive(saved), "Worker identity or context changed");
+    SessionRuntime.StopVerified(saved);
+});
+Test("registration rejects an exited process without saving a false live session", () =>
+{
+    var f = Fixture(); var runtime = new SessionRuntime(f.App);
+    using var child = new SuspendedProcess(f.App);
+    child.Process.Kill(); Assert(child.Process.WaitForExit(10000), "Child did not exit");
+    Reject(() => runtime.Track(child.Process, "account", f.App, null, "terminal"));
+    Assert(runtime.List().Count == 0, "Exited process registered");
+});
 Test("saved permission policy retains writable roots, network and temp exclusions", () =>
 {
     using var saved = JsonDocument.Parse("{\"type\":\"workspace-write\",\"writable_roots\":[\"C:\\\\allowed\"],\"network_access\":false,\"exclude_tmpdir_env_var\":true,\"exclude_slash_tmp\":true}");
