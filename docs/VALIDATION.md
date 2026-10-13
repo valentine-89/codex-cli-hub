@@ -1,4 +1,34 @@
-# Validation — v1.11.2, 2026-10-03
+# Validation — v1.12.0, 2026-10-13
+
+- **75/75 .NET tests and 4/4 existing Python maintenance tests passed.** Release build and
+  single-file publish completed without warnings/errors. Packaged MCP handshake exposes the same
+  16 tools, reports 1.12.0, excludes private fields and exits on EOF; only its synthetic bridge was stopped.
+- Synthetic NTFS/SQLite tests cover deleted profiles, archive paths, matching metadata IDs, missing
+  files, incorrect IDs, paths outside the shared store, nested links, device-prefixed aliases, unchanged
+  canonical paths, busy databases, concurrent changes, rollback, unknown schema/triggers and idempotence.
+  Non-path columns, JSONL bytes and history sentinels remain unchanged. Audit does not write the database.
+- Installed **CLI 0.162.1** and **Desktop backend 0.162.0-alpha.17.2** pass schema-only fixture tests:
+  profile B reads/resumes A's synthetic thread without a model turn; the production command blocks
+  repair while a client runs. A restored legacy alias plus old-style profile deletion reproduces a
+  missing list entry and archive error -32600. Repair restores listing and archive/unarchive, with
+  unchanged transcript hash/title and no changes on the second repair. Current resume can canonicalize
+  the path itself, so the harness explicitly restores the legacy alias to reproduce never-resumed chats.
+- These tests copy schema/migration definitions only, never real thread data or credentials. The
+  production process guard stays enabled; an internal test-only hook is constrained to the named
+  temporary fixture tree. Fixtures are removed by named-file deletion and empty-directory removal.
+- Read-only live audit: **153 threads, 13 profile aliases, 6 broken aliases, zero validation issues**;
+  all 13 canonical transcript IDs match. SQLite quick_check was `ok`; no failed migration was found.
+  This identifies broken profile references, not evidence of schema corruption.
+- **Live repair remains pending while Codex/Manager are running.** The offline update helper waits
+  for those clients to exit, then records repair results, unchanged transcript hashes and recovered
+  API visibility. Root EXE promotion and old-process replacement are likewise deferred. No real chat
+  was archived as a test; archive acceptance above uses a dedicated synthetic thread.
+
+Reproduce binary acceptance with `python -B tests/test-session-store-integration.py --schema-home
+<home> --manager <staged-exe> --test-host <Release-test-exe> --codex <CLI-exe> --codex <Desktop-exe>`.
+Run it from PowerShell 7 on NTFS; it starts no model turn and does not use account authentication.
+
+## Previous validation — v1.11.2, 2026-10-03
 
 - **65/65 .NET tests passed**; Release build completed with zero warnings/errors.
 - Reproduced the reported launch race with 20 hidden PowerShell ShellExecute launches: 15 returned
@@ -163,7 +193,7 @@ Release ZIP contains only the executable; local profiles and account metadata ar
 
 ## Current executable SHA-256
 ```text
-979CCCACEE052DF4300CA50B95964735E5EC2B2AE2AB3FD1FE8537B634BB57F4
+835CA1781057BAFE13C14016C796D592424C22E8C00D21762105D27612A23EAC
 ```
 
 Protocol source: https://learn.chatgpt.com/docs/app-server

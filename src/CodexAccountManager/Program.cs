@@ -12,10 +12,43 @@ internal static class Program
     {
         var rootIndex = Array.IndexOf(args, "--root");
         var root = rootIndex >= 0 && rootIndex + 1 < args.Length ? args[rootIndex + 1] : DefaultRoot();
-        var background = args.Any(a => a is "--mcp" or "--call" or "--automation-host" or "--session-host");
+        var maintenance = args.Any(a => a is "--session-store-audit" or "--session-store-repair");
+        var background = maintenance || args.Any(a => a is "--mcp" or "--call" or "--automation-host" or "--session-host");
         try
         {
             var repository = new AccountRepository(root);
+            if (maintenance)
+            {
+                using var maintenanceOutput = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true };
+                if (args.Contains("--verify-api") && !args.Contains("--session-store-repair"))
+                    throw new IOException("API verification requires --session-store-repair; audit is read-only.");
+                var service = new SessionStoreMaintenance(repository.Root, repository.LoadSettings().DefaultCodexHome);
+                using var maintenanceLock = args.Contains("--session-store-repair") ? repository.AcquireLock() : null;
+                var audit = service.Audit();
+                Dependencies? maintenanceDependencies = null;
+                var sharedHome = repository.LoadSettings().DefaultCodexHome;
+                if (args.Contains("--session-store-repair") && audit.Issues.Count == 0
+                    && (audit.Repairs.Count > 0 || args.Contains("--verify-api")))
+                {
+                    SessionStoreMaintenance.EnsureCodexClosed();
+                    maintenanceDependencies = DependencyDetector.DetectAsync().GetAwaiter().GetResult();
+                    // Require the current paginated API before our first database update.
+                    _ = new CodexThreadReader(new Logger(repository.Root))
+                        .ReadAsync(maintenanceDependencies, sharedHome, sharedHome).GetAwaiter().GetResult();
+                }
+                var changed = args.Contains("--session-store-repair") ? service.Repair(audit) : 0;
+                string[]? visibleSessionIds = null;
+                if (args.Contains("--verify-api"))
+                {
+                    visibleSessionIds = new CodexThreadReader(new Logger(repository.Root))
+                        .ReadAsync(maintenanceDependencies!, sharedHome, sharedHome).GetAwaiter().GetResult().Select(s => s.Id).ToArray();
+                }
+                var result = new { operation = args.Contains("--session-store-repair") ? "repair" : "audit", changed,
+                    audit, after = changed > 0 ? service.Audit() : audit, visibleSessionIds };
+                maintenanceOutput.WriteLine(JsonSerializer.Serialize(result, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+                if (audit.Issues.Count > 0) Environment.ExitCode = 2;
+                return;
+            }
             if (background) { RunBackground(repository, args).GetAwaiter().GetResult(); return; }
             ApplicationConfiguration.Initialize();
             var sessionsIndex = Array.IndexOf(args, "--sessions");

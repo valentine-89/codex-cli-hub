@@ -5,7 +5,7 @@ using System.Text.Json;
 namespace CodexAccountManager.Core;
 
 // A short-lived, local stdio connection. Listing does not load a thread or start a turn.
-public sealed class CodexThreadReader
+public sealed class CodexThreadReader(Logger? logger = null)
 {
     public async Task<IReadOnlyList<CatalogSession>> ReadAsync(Dependencies dependencies, string profileHome,
         string sharedHome, CancellationToken cancellationToken = default)
@@ -30,11 +30,16 @@ public sealed class CodexThreadReader
         var diagnostics = Drain(process.StandardError);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(30));
+        var method = "initialize";
+        var version = "unknown";
         try
         {
-            await Send(new { id = 1, method = "initialize", @params = new { clientInfo = new { name = "codex_account_manager", version = "1.10.0" } } });
-            _ = await Receive(1);
+            await Send(new { id = 1, method = "initialize", @params = new { clientInfo = new { name = "codex_account_manager", version = "1.12.0" } } });
+            var initialized = await Receive(1);
+            var match = System.Text.RegularExpressions.Regex.Match(Text(initialized, "userAgent") ?? "", @"^[^/\s]+/([0-9][0-9A-Za-z.+-]{0,63})(?:\s|$)");
+            if (match.Success) version = match.Groups[1].Value;
             await Send(new { method = "initialized", @params = new { } });
+            method = "thread/list";
             var sessions = new Dictionary<string, CatalogSession>(StringComparer.OrdinalIgnoreCase);
             var cursors = new HashSet<string>(StringComparer.Ordinal);
             string? cursor = null;
@@ -59,7 +64,15 @@ public sealed class CodexThreadReader
             return sessions.Values.ToArray();
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        { throw new TimeoutException("Session discovery timed out."); }
+        {
+            logger?.Write($"rpc:{method}:timeout:codex-{version}", dependencies.NativeCodex);
+            throw new TimeoutException("Session discovery timed out.");
+        }
+        catch (Exception ex) when (ex is IOException or JsonException)
+        {
+            logger?.Write($"rpc:{method}:{ex.GetType().Name}:codex-{version}", dependencies.NativeCodex, (ex as CodexRpcException)?.Code);
+            throw;
+        }
         finally
         {
             process.StandardInput.Close();
@@ -84,7 +97,9 @@ public sealed class CodexThreadReader
                 var value = message.RootElement;
                 if (!value.TryGetProperty("id", out var responseId) || responseId.ValueKind != JsonValueKind.Number
                     || !responseId.TryGetInt32(out var number) || number != id) continue;
-                if (value.TryGetProperty("error", out _)) throw new IOException("Codex could not list sessions.");
+                if (value.TryGetProperty("error", out var error))
+                    throw new CodexRpcException(method, error.ValueKind == JsonValueKind.Object && error.TryGetProperty("code", out var code)
+                        && code.ValueKind == JsonValueKind.Number && code.TryGetInt32(out var numberCode) ? numberCode : null, version);
                 if (!value.TryGetProperty("result", out var result)) throw new IOException("Invalid Codex response.");
                 return result.Clone();
             }
@@ -112,4 +127,10 @@ public sealed class CodexThreadReader
         var buffer = new char[2048];
         while (await reader.ReadAsync(buffer) != 0) { }
     }
+}
+
+public sealed class CodexRpcException(string method, int? code, string version)
+    : IOException($"Codex {version}: {method} failed (code {code?.ToString() ?? "unknown"}).")
+{
+    public int? Code { get; } = code;
 }

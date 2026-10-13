@@ -11,6 +11,7 @@ public sealed class MainForm : Form
     private readonly Func<string, CancellationToken, Task<AccountRefreshResult>> readAccount;
     private readonly CodexQuotaService quotaService = new();
     private readonly Logger logger;
+    private readonly WorkspaceCatalogService catalogService;
     private readonly AccountDocument accounts;
     private AppSettings settings;
     private Dependencies dependencies = new(null, null, false);
@@ -36,6 +37,7 @@ public sealed class MainForm : Form
     {
         this.readAccount = readAccount ?? new AccountRefreshService().ReadAsync;
         this.repository = repository; logger = new(repository.Root); profiles = new(repository.Root, new JunctionService());
+        catalogService = new(logger);
         accounts = repository.LoadAccounts(); settings = repository.LoadSettings();
         sessionRuntime = new SessionRuntime(repository.Root);
         launcher.OnLaunched = (process, id, cwd, thread) => sessionRuntime.Track(process, id, cwd, thread, "terminal");
@@ -327,7 +329,7 @@ public sealed class MainForm : Form
         if (action == CodexAction.Open)
         {
             using var picker = new ProjectPickerForm(account.DisplayName,
-                token => new WorkspaceCatalogService().ReadAsync(dependencies, path, settings.DefaultCodexHome, token));
+                token => catalogService.ReadAsync(dependencies, path, settings.DefaultCodexHome, token));
             if (picker.ShowDialog(this) != DialogResult.OK || picker.Selection is not { } selection) return Task.CompletedTask;
             workingDirectory = WorkspaceCatalogService.ResolveDirectory(selection, settings.DefaultCodexHome);
             sessionId = selection.SessionId;

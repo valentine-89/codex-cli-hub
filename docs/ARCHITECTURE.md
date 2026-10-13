@@ -51,10 +51,12 @@ launch, `sqlite_home` is set to the default Codex home in the profile config and
 Current Codex metadata, names, recency and paginated history therefore use the same SQLite
 databases as Desktop across all windows. Other SQLite stores under this root are shared too.
 Authentication, config, input history and the legacy JSONL name index remain profile-local.
-Existing private SQLite files are preserved; the explicit maintenance script imports CLI-only
-threads and their history without overwriting Desktop records. No whole-home linking or copying.
+Existing private SQLite files are preserved. The historical import script is a separate manual
+operation; session-path repair never imports private history or restores deliberately deleted threads.
+No whole-home linking or copying.
 Deletion verifies paths, junction tag and target, rejects unexpected reparse points, detaches
-both links without recursion and deletes only the private tree. It never recursively traverses
+both links without recursion and deletes only the private tree, after canonicalizing every shared
+database reference through that profile. It never recursively traverses
 the shared sessions directory.
 
 ## User operations
@@ -74,7 +76,10 @@ the shared sessions directory.
   layout is recognized too. Explicit project assignments take precedence. Existing chat workspaces are reused.
   Legacy `manager-chats` remains discoverable; the explicit offline Python repair registers old chat IDs/path
   hints after checking Desktop is closed, with a backup and concurrent-change checks. No history or file moves.
-  API failure falls back visibly to bounded first-record JSONL metadata, without following nested links.
+  API failure retains the last complete successful catalog per shared/profile home in the same process,
+  with an explicit stale warning. First-load failure is an error. Cancellation never replaces cached data.
+  Automatic JSONL catalog fallback has been removed; RPC errors preserve code, method and sanitized
+  executable version in logs, without raw response text or stderr.
   Opening a project permits ordinary UNC paths and directory links; destructive profile operations retain
   their original strict local-drive and no-reparse validation.
 - Login: prefer PowerShell 7; authorized Windows PowerShell 5.1 fallback uses UTF-8 setup.
@@ -102,6 +107,29 @@ the shared sessions directory.
   it across restarts. This operation never purchases credits or runs from the automatic timer.
 
 ## Distribution boundary
+
+### Shared-session maintenance (1.12.0)
+
+`--session-store-audit` reads `state_5.sqlite` in a read transaction. `--session-store-repair`
+holds the Manager lock and uses Windows `winsqlite3.dll`, with no bundled native library or Python
+dependency. Supported migration 59, required column types and known trigger events are checked
+before writes. The repair command checks the current paginated API before updates, then optionally
+verifies visibility with `--verify-api`. Audit never starts an app-server. Unknown state database
+generations, failed migrations and trigger changes fail closed.
+The current integration targets are CLI 0.162.1 and Desktop backend 0.162.0-alpha.17.2.
+
+Only managed profile aliases into shared `sessions`/`archived_sessions` become repair candidates.
+Existing canonical device-prefixed paths remain unchanged. Every file header must identify the same
+thread; paths, junction targets and ordinary ancestors are verified. Files and directories are pinned
+against replacement during repair. `BEGIN IMMEDIATE`, an in-transaction re-audit, compare-and-swap
+updates and repeated idle checks protect the complete batch; only `rollout_path` is written. Profile
+deletion runs this guard before detaching either junction. Active `codex` or `ChatGPT` processes block
+writes/deletion conservatively even if they use another home; no client is terminated.
+
+`scripts/finish-update.ps1` is a one-shot offline helper: it waits for Codex and Manager processes to
+exit, verifies the staged release hash, repairs, compares transcript hashes and checks API visibility,
+then promotes the portable executable and updates MCP registration. It records local status/results
+without making database backups. Existing clients remain on their original binary until closed.
 
 Source control excludes all runtime account data. Release ZIPs use an explicit allowlist:
 exactly `CodexAccountManager.exe`. Public documentation remains on GitHub. Never zip a used portable directory wholesale.

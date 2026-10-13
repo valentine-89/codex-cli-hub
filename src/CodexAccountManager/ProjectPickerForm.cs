@@ -84,7 +84,7 @@ public sealed class ProjectPickerForm : Form
             status.Text = result.Warning ?? $"{catalog.Projects.Count} folders · {catalog.Sessions.Count(s => s.IsProjectless)} chats without project";
         }
         catch (OperationCanceledException) { }
-        catch (Exception) { if (!IsDisposed) status.Text = "Could not read sessions. Browse for a folder or start a chat without project."; }
+        catch (Exception) { if (!IsDisposed) status.Text = "Sessions not updated. Check Codex and retry Refresh."; }
         finally { if (!IsDisposed) refresh.Enabled = true; }
     }
 

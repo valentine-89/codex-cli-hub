@@ -9,28 +9,36 @@ public sealed record CatalogSession(string Id, string Title, string? WorkingDire
 }
 
 public sealed record WorkspaceCatalog(IReadOnlyList<SessionProject> Projects, IReadOnlyList<CatalogSession> Sessions,
-    string? Warning = null);
+    string? Warning = null, bool IsStale = false);
 
 public sealed record CliSelection(string? Directory, string? SessionId = null, bool IsProjectless = false);
 
-public sealed class WorkspaceCatalogService
+public sealed class WorkspaceCatalogService(Logger? logger = null)
 {
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, WorkspaceCatalog> lastGood = new(StringComparer.OrdinalIgnoreCase);
     public async Task<WorkspaceCatalog> ReadAsync(Dependencies dependencies, string profileHome, string sharedHome,
         CancellationToken cancellationToken = default)
     {
-        IReadOnlyList<CatalogSession> sessions;
-        string? warning = null;
-        try { sessions = await new CodexThreadReader().ReadAsync(dependencies, profileHome, sharedHome, cancellationToken); }
+        var key = PathSafety.Canonical(sharedHome) + "|" + PathSafety.Canonical(profileHome);
+        try
+        {
+            var sessions = await new CodexThreadReader(logger).ReadAsync(dependencies, profileHome, sharedHome, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            var catalog = Build(sharedHome, sessions, cancellationToken: cancellationToken);
+            lastGood[key] = catalog;
+            return catalog;
+        }
         catch (Exception ex) when (ex is IOException or TimeoutException or JsonException or System.ComponentModel.Win32Exception)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var fallback = new SessionProjectCatalog().Read(Path.Combine(sharedHome, "sessions"), cancellationToken);
-            sessions = fallback.Sessions;
-            warning = "Codex session list unavailable; showing legacy session metadata.";
+            if (lastGood.TryGetValue(key, out var previous))
+                return previous with { IsStale = true, Warning = "Not updated · showing the last successful session list. " + SafeFailure(ex) };
+            throw new IOException("Session list unavailable. " + SafeFailure(ex), ex);
         }
-        cancellationToken.ThrowIfCancellationRequested();
-        return Build(sharedHome, sessions, warning, cancellationToken);
     }
+
+    private static string SafeFailure(Exception ex) => ex is CodexRpcException ? ex.Message
+        : ex is TimeoutException ? "Codex timed out." : "Check Codex and retry Refresh.";
 
     public static string ChatRoot(string sharedHome) => Path.Combine(PathSafety.Canonical(sharedHome), "manager-chats");
 

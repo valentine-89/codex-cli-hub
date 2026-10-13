@@ -13,6 +13,7 @@ public sealed class ManagerAutomation
     private readonly string executable;
     private readonly string hostMode;
     private readonly SessionRuntime runtime;
+    private readonly WorkspaceCatalogService catalog;
     private readonly CodexProcessLauncher launcher = new();
     private readonly SemaphoreSlim operations = new(1, 1);
     public ManagerAutomation(AccountRepository repository, Func<AccountDocument> accounts, Func<AppSettings> settings,
@@ -20,13 +21,14 @@ public sealed class ManagerAutomation
     {
         this.repository = repository; this.accounts = accounts; this.settings = settings; this.refresh = refresh;
         this.dependencies = dependencies; this.executable = executable; this.hostMode = hostMode; runtime = new(repository.Root);
+        catalog = new(new Logger(repository.Root));
     }
     public async Task<object> Call(string tool, JsonElement args)
     {
         await operations.WaitAsync();
         try
         {
-            if (tool == "manager_health") return new { version = "1.11.2", processId = Environment.ProcessId,
+            if (tool == "manager_health") return new { version = "1.12.0", processId = Environment.ProcessId,
                 transport = "stdio + current-user named pipe", supportsLockedDesktop = true, root = repository.Root, hostMode };
             if (tool == "accounts_list") return new { accounts = accounts().Accounts.Select((a, i) => AccountView(a, i)).ToArray() };
             if (tool == "account_refresh")
@@ -39,8 +41,7 @@ public sealed class ManagerAutomation
                 var account = Account(Required(args, "accountId"));
                 var deps = await dependencies();
                 var home = new CodexProfileService(repository.Root, new JunctionService()).Validate(account, settings());
-                var sessions = await new CodexThreadReader().ReadAsync(deps, home, settings().DefaultCodexHome);
-                return WorkspaceCatalogService.Build(settings().DefaultCodexHome, sessions);
+                return await catalog.ReadAsync(deps, home, settings().DefaultCodexHome);
             }
             if (tool == "sessions_list")
             {

@@ -1,6 +1,37 @@
 using CodexAccountManager.Core;
 using System.Text.Json;
 
+if (args.Length == 3 && args[0] == "--session-store-fixture-list")
+{
+    var app = PathSafety.Canonical(args[1]);
+    var fixture = Path.GetDirectoryName(app)!;
+    if (!PathSafety.Within(fixture, Path.GetTempPath()) || !Path.GetFileName(fixture).StartsWith("CodexSessionStoreAcceptance-", StringComparison.Ordinal)) return 80;
+    var home = Path.Combine(fixture, "shared");
+    var sessions = await new CodexThreadReader().ReadAsync(new Dependencies(null, null, false, args[2]), home, home);
+    Console.WriteLine(JsonSerializer.Serialize(sessions.Select(s => s.Id)));
+    return 0;
+}
+
+// The integration harness owns this isolated temp tree. Production commands always
+// use the real process guard; this test hook cannot address a live Codex home.
+if (args.Length is 2 or 3 && args[0] == "--session-store-fixture-repair")
+{
+    var app = PathSafety.Canonical(args[1]);
+    var fixture = Path.GetDirectoryName(app)!;
+    if (!PathSafety.Within(fixture, Path.GetTempPath()) || !Path.GetFileName(fixture).StartsWith("CodexSessionStoreAcceptance-", StringComparison.Ordinal)) return 80;
+    var home = Path.Combine(fixture, "shared");
+    PathSafety.OrdinaryDirectory(app); PathSafety.OrdinaryDirectory(home);
+    var service = new SessionStoreMaintenance(app, home, () => { });
+    var changed = service.Repair(service.Audit());
+    if (args.Length == 3)
+    {
+        var account = new Account { Id = args[2], ProfilePath = Path.Combine("profiles", args[2]), DisplayName = "fixture" };
+        new CodexProfileService(app, new JunctionService(), () => { }).Delete(account, new() { DefaultCodexHome = home });
+    }
+    Console.WriteLine(JsonSerializer.Serialize(new { changed, after = service.Audit() }));
+    return 0;
+}
+
 if (args.Contains("--echo-arguments"))
 { Console.OutputEncoding = new System.Text.UTF8Encoding(false); Console.Write(JsonSerializer.Serialize(args)); return 0; }
 
@@ -69,6 +100,7 @@ if (args.Contains("app-server"))
             Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { id = id.GetInt32(), result = new { } }));
             Console.WriteLine("{\"method\":\"turn/completed\",\"params\":{\"turn\":{\"id\":\"turn-test\",\"status\":\"interrupted\"}}}");
         }
+        else if (method == "initialize") Console.WriteLine(JsonSerializer.Serialize(new { id = id.GetInt32(), result = new { userAgent = "codex_account_manager/0.162.1 (fixture)" } }));
         else Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { id = id.GetInt32(), result = new { } }));
     }
     return 0;
@@ -515,15 +547,23 @@ tests.Add(("current thread discovery paginates, deduplicates and uses shared sta
     try { await new CodexThreadReader().ReadAsync(deps, f.App, f.Settings.DefaultCodexHome); throw new Exception("Repeated cursor accepted"); }
     catch (IOException) { }
 }));
-tests.Add(("unavailable thread API falls back but cancellation stops discovery", async () =>
+tests.Add(("unavailable API preserves the last successful list without JSONL fallback", async () =>
 {
     var f = Fixture(); var deps = new Dependencies(null, null, false, Environment.ProcessPath!);
+    var service = new WorkspaceCatalogService(new Logger(f.App));
+    var good = await service.ReadAsync(deps, f.App, f.Settings.DefaultCodexHome);
     File.WriteAllText(Path.Combine(f.App, "catalog-mode.txt"), "error");
     File.WriteAllText(Path.Combine(f.Shared, "old.jsonl"), System.Text.Json.JsonSerializer.Serialize(new {
         type = "session_meta", payload = new { cwd = f.App, id = Guid.NewGuid().ToString() }
     }));
-    var result = await new WorkspaceCatalogService().ReadAsync(deps, f.App, f.Settings.DefaultCodexHome);
-    Assert(result.Warning is not null && result.Projects.Single().Directory == f.App, "Legacy fallback missing");
+    var result = await service.ReadAsync(deps, f.App, f.Settings.DefaultCodexHome);
+    Assert(result.IsStale && result.Warning is not null && result.Sessions.SequenceEqual(good.Sessions), "Previous list lost");
+    try { await new WorkspaceCatalogService().ReadAsync(deps, f.App, f.Settings.DefaultCodexHome); throw new Exception("Initial failure used fallback"); }
+    catch (IOException ex) { Assert(ex.InnerException is CodexRpcException { Code: -32601 }, "RPC code lost"); }
+    var log = File.ReadAllText(Path.Combine(f.App, "logs", "app.log"));
+    Assert(log.Contains("thread/list") && log.Contains("-32601"), "RPC diagnostic lost");
+    File.WriteAllText(Path.Combine(f.App, "catalog-mode.txt"), "");
+    Assert(!(await service.ReadAsync(deps, f.App, f.Settings.DefaultCodexHome)).IsStale, "Successful refresh remained stale");
     File.WriteAllText(Path.Combine(f.App, "catalog-mode.txt"), "cancel");
     using var canceled = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
     try { await new WorkspaceCatalogService().ReadAsync(deps, f.App, f.Settings.DefaultCodexHome, canceled.Token); throw new Exception("Cancellation ignored"); }
@@ -1075,6 +1115,7 @@ tests.Add(("managed CLI resume, send, approval, steer, interrupt and stop use pe
     using var saved = System.Text.Json.JsonDocument.Parse(File.ReadAllText(runtime.PathFor(record.Id, ".state.json")));
     Assert(saved.RootElement.GetProperty("status").GetString() == "stopped", "Final session state not persisted");
 }));
+SessionStoreTests.Register(tests, root);
 var failures = 0;
 try
 {
@@ -1118,7 +1159,8 @@ sealed class Fixture
         Root = root; App = System.IO.Path.Combine(root, "app"); Directory.CreateDirectory(App);
         var home = System.IO.Path.Combine(root, "default-home"); Shared = System.IO.Path.Combine(home, "sessions");
         Directory.CreateDirectory(Shared); File.WriteAllText(Sentinel, "shared-do-not-delete");
-        Settings = new() { DefaultCodexHome = home, WorkingDirectory = App }; Service = new(App, Junctions);
+        SessionStoreTests.CreateDatabase(home);
+        Settings = new() { DefaultCodexHome = home, WorkingDirectory = App }; Service = new(App, Junctions, () => { });
     }
     public Account Create(string name) => Service.Create(name, "", Settings);
     public string Path(Account a) => PathSafety.Profile(App, a);

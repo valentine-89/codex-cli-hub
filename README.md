@@ -7,6 +7,10 @@ Từ **v1.11.0**, app có MCP điều khiển quota và phiên CLI qua stdio/nam
 Không cần computer-use hoặc mở khóa màn hình. Khi GUI đóng, bridge chạy nền; máy vẫn cần bật và không sleep.
 Cài bằng `pwsh -File ./scripts/install-mcp.ps1`.
 
+**v1.12.0:** sửa nguyên nhân mất phiên và archive lỗi sau khi xóa account: chuẩn hóa tham chiếu
+SQLite về kho chung trước khi gỡ junction. Có lệnh kiểm tra/sửa kho phiên; API lỗi giữ danh sách
+thành công gần nhất và báo chưa cập nhật, không tự đọc danh sách JSONL thay thế.
+
 **v1.11.2:** sửa lỗi `Object reference not set to an instance of an object` khi mở phiên mới.
 Nhận diện terminal/worker ngay lúc khởi động, kể cả trước khi Windows khởi tạo danh sách module.
 
@@ -116,8 +120,8 @@ CLI/Desktop tương tác chưa archive và không lọc provider. Bổ sung các
 dùng dấu projectless của Desktop để phân loại, không suy đoán từ việc thiếu Git hoặc thư mục bị mất.
 Hỗ trợ tiền tố Windows `\\?\`, UNC/WSL, `/mnt/<drive>` và đường dẫn cũ `C:\mnt\<drive>` khi đích thật tồn tại.
 **Refresh** tải lại danh sách; ô tìm kiếm lọc đường dẫn và tên chat. Resume truyền ID và `--cd` rõ ràng.
-Nếu API không dùng được, dialog thông báo đang dùng metadata JSONL cũ (chỉ record đầu, tối đa 16 MiB,
-không đọc nội dung hội thoại hoặc đi qua junction con). Fallback có thể thiếu các phiên chỉ lưu trong SQLite.
+Nếu API lỗi, giữ danh sách thành công gần nhất trong tiến trình và báo **Not updated**. Khi chưa có
+danh sách thành công, báo lỗi để thử lại. Không tự thay bằng danh sách rỗng hoặc fallback JSONL.
 Đọc danh sách không chạy model turn, không sửa Desktop global state hay nội dung session.
 
 Phiên tạo bằng 1.10.0/1.10.1 trong `manager-chats` vẫn được manager liệt kê, nhưng Desktop chưa có dấu
@@ -236,18 +240,49 @@ Apply dành cho đăng nhập dùng `auth.json`; không chuyển đổi credenti
 
 ## Xóa account và gỡ app
 
-Đóng mọi terminal dùng profile. Chọn **••• → Delete account**, đọc tên và đường dẫn trong confirmation.
-Manager chặn terminal đang theo dõi còn chạy; sau restart cần người dùng đảm bảo đóng cả
-terminal cũ hoặc được mở thủ công. Manager không force-kill Codex.
+Đóng Codex Desktop và mọi phiên Codex CLI trước khi xóa account. Chọn **••• → Delete account**,
+đọc tên và đường dẫn trong confirmation. Manager chặn khi phát hiện tiến trình `codex` hoặc
+`ChatGPT`, kể cả tiến trình ngoài tài khoản đã chọn; không tự dừng công việc.
 
 Quy trình: validate ID/path/ancestors → preflight toàn profile, từ chối reparse bất thường →
-verify mount-point tag và target sessions → tháo junction bằng delete không recursive →
+verify mount-point tag và target sessions → kiểm tra schema, ID trong file và chuẩn hóa mọi
+`threads.rollout_path` qua profile bằng transaction → tháo junction bằng delete không recursive →
 verify shared directory còn tồn tại → xóa private tree bằng traversal không theo link →
 xóa metadata cuối cùng. Directory handles ngăn rename/reparse khi đang traversal.
 Không dùng `Directory.Delete(path, true)` hoặc recursive delete qua junction.
 
 **Trước khi xóa cả thư mục portable, Delete từng account trong app.** Chỉ sau khi tháo hết
 junction mới xóa thư mục app. Không giả định mọi công cụ recursive delete đều an toàn với junction.
+
+## Kiểm tra và sửa đường dẫn phiên (1.12.0)
+
+Phạm vi đã kiểm thử: CLI **0.162.1**, Desktop backend **0.162.0-alpha.17.2**, `state_5.sqlite`
+đến migration **59**. Dùng `winsqlite3.dll` có sẵn trên Windows; không cần Python hoặc SQLite CLI.
+Schema/database/trigger không nhận diện được sẽ chặn ghi, không tự chọn tương thích bản cũ.
+
+```powershell
+# Chỉ đọc; trả JSON, số đường dẫn qua profile, số file mất qua alias và các lỗi cần xem xét.
+./CodexAccountManager.exe --root '<portable>' --session-store-audit
+# Đóng Manager, Desktop và CLI trước khi sửa.
+./CodexAccountManager.exe --root '<portable>' --session-store-repair --verify-api
+```
+
+Chỉ cập nhật `threads.rollout_path` về `DefaultCodexHome/sessions` hoặc `archived_sessions`.
+Mỗi đích phải nằm trong kho chung và có `session_meta.payload.id` đúng bản ghi. File thiếu,
+ID sai, reparse lạ, database bận hoặc dữ liệu thay đổi giữa kiểm tra và ghi sẽ chặn/rollback toàn bộ.
+Không sửa JSONL, tên, ID, project, archive hay database lịch sử. Chạy lại không tạo thêm thay đổi.
+Lệnh này không nhập database riêng cũ hoặc khôi phục phiên đã xóa có chủ đích; không dùng script
+nhập lịch sử cũ để chữa lỗi đường dẫn này. Lệnh sửa kiểm tra API phân trang trước khi ghi;
+`--verify-api` kiểm tra lại danh sách qua RPC sau sửa và chỉ dùng cùng lệnh sửa.
+Log chỉ giữ phương thức, mã lỗi và phiên bản Codex, không giữ raw RPC error hay nội dung hội thoại.
+
+Khi executable đang dùng, publish vào `versions/1.12.0`, đăng ký MCP trỏ bản đó với `--root`
+thư mục portable. Kết nối đã mở vẫn dùng tiến trình cũ đến khi đóng/mở lại. Có thể chạy
+`scripts/finish-update.ps1` bằng PowerShell 7 với các tham số `-Root`, `-Source` (EXE đã stage
+trong `versions/1.12.0`) và `-Sha256` để chờ tối đa 24 giờ. Helper không dừng process; khi Desktop,
+CLI và Manager đều đã đóng, nó sửa/kiểm tra đường dẫn, đối chiếu hash JSONL và API, cập nhật EXE
+gốc rồi đăng ký MCP cùng bản. Trạng thái ở `logs/update-1.12.0.json`, kết quả sửa ở
+`logs/session-store-repair-1.12.0.json`. Nếu hết thời gian hoặc lỗi, xem trạng thái rồi chạy lại.
 
 ## Recovery thủ công
 

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.12.0 — 2026-10-13
+
+- Prevent disappearing chats and `no rollout found` archive failures after account deletion by verifying and canonicalizing shared SQLite rollout paths before detaching profile junctions.
+- Add read-only session-store audit and transactional offline repair commands using Windows SQLite. Reject missing/mismatched files, unsafe paths, unknown schema, busy databases and concurrent changes; preserve transcripts and all non-path metadata.
+- Remove automatic JSONL session-list fallback. Keep the last successful catalog with a stale status on API errors and log sanitized RPC method, code and executable version.
+- Validate CLI 0.162.1 and Desktop backend 0.162.0-alpha.17.2; retain existing MCP tool parameters. Add staged portable promotion that waits for clients to close before repair and update.
+
+## 1.11.2 — 2026-10-03
+
+- Fix terminal and worker registration when Windows has not yet initialized process modules; verify process identity through the kernel image query.
+
 ## 1.11.1 — 2026-10-03
 
 - Add Open terminal to transfer the same stored thread/account to a normal interactive CLI without a new model turn. Add a Sessions window for managed background workers and interactive terminals, with current activity, latest response, Stop and explicit Force stop controls. Closing the viewer leaves CLI workers running.

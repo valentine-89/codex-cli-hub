@@ -1,7 +1,13 @@
 namespace CodexAccountManager.Core;
 
-public sealed class CodexProfileService(string root, JunctionService junctions)
+public sealed class CodexProfileService
 {
+    private readonly string root;
+    private readonly JunctionService junctions;
+    private readonly Action ensureIdle;
+    public CodexProfileService(string root, JunctionService junctions) : this(root, junctions, SessionStoreMaintenance.EnsureCodexClosed) { }
+    internal CodexProfileService(string root, JunctionService junctions, Action ensureIdle)
+    { this.root = root; this.junctions = junctions; this.ensureIdle = ensureIdle; }
     public string SharedTarget(AppSettings settings)
     {
         var target = PathSafety.Canonical(Path.Combine(settings.DefaultCodexHome, "sessions"));
@@ -122,6 +128,7 @@ public sealed class CodexProfileService(string root, JunctionService junctions)
         if (hasArchiveLink) junctions.Verify(archiveLink, archiveTarget);
         ValidateTree(profile, Path.Combine(profile, "sessions"), hasArchiveLink ? archiveLink : null);
         junctions.Verify(Path.Combine(profile, "sessions"), target);
+        new SessionStoreMaintenance(root, settings.DefaultCodexHome, ensureIdle).PrepareProfileDeletion(account.Id);
         if (hasArchiveLink) junctions.Remove(archiveLink, archiveTarget);
         junctions.Remove(Path.Combine(profile, "sessions"), target);
         DeleteContents(profile);

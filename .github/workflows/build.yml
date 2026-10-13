@@ -18,7 +18,7 @@ jobs:
           node-version: '22'
       - name: Install verified CLI version
         shell: pwsh
-        run: npm install --global @openai/codex@0.153.4
+        run: npm install --global @openai/codex@0.162.1
       - name: Build and test
         shell: pwsh
         run: ./scripts/build.ps1 -SkipPublish

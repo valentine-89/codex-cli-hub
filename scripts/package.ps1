@@ -1,9 +1,9 @@
 #Requires -Version 7.0
 [CmdletBinding()]
-param()
+param([string]$Manager)
 $ErrorActionPreference = 'Stop'
 $repoRoot = [IO.Path]::GetFullPath((Split-Path $PSScriptRoot -Parent))
-$exe = Join-Path $repoRoot 'dist/CodexAccountManager/CodexAccountManager.exe'
+$exe = if ($Manager) { [IO.Path]::GetFullPath($Manager) } else { Join-Path $repoRoot 'dist/CodexAccountManager/CodexAccountManager.exe' }
 $version = ([xml](Get-Content -LiteralPath (Join-Path $repoRoot 'src/CodexAccountManager/CodexAccountManager.csproj') -Raw)).Project.PropertyGroup.Version
 $output = Join-Path $repoRoot 'dist/releases'
 $zip = Join-Path $output "CodexAccountManager-$version-win-x64.zip"
