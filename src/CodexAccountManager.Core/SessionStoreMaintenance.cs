@@ -3,7 +3,8 @@ using System.Text.Json;
 
 namespace CodexAccountManager.Core;
 
-public sealed record SessionPathRepair(string ThreadId, string PreviousPath, string CanonicalPath, bool Archived, bool MissingPreviousPath);
+public sealed record SessionPathRepair(string ThreadId, string PreviousPath, string CanonicalPath, bool Archived, bool MissingPreviousPath,
+    string? PhysicalPath = null);
 public sealed record SessionStoreIssue(string ThreadId, string Path, string Reason);
 public sealed record SessionStoreAudit(int SchemaVersion, int CheckedThreads, IReadOnlyList<SessionPathRepair> Repairs,
     IReadOnlyList<SessionStoreIssue> Issues)
@@ -43,13 +44,14 @@ public sealed class SessionStoreMaintenance
         {
             // Hold all ordinary ancestors and every verified file against rename/write.
             var directories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var path in expected.Repairs.Select(r => r.CanonicalPath).Append(database))
+            foreach (var path in expected.Repairs.Select(r => r.PhysicalPath ?? r.CanonicalPath).Append(database))
                 for (var parent = Path.GetDirectoryName(path); parent is not null; parent = Path.GetDirectoryName(parent)) directories.Add(parent);
             foreach (var directory in directories.OrderBy(p => p.Length)) pins.Add(JunctionService.PinDirectory(directory, allowWrites: true));
             foreach (var repair in expected.Repairs)
             {
-                if (!PathSafety.Within(repair.CanonicalPath, home)) throw new IOException("Repair target is outside the shared store.");
-                pins.Add(VerifyHeader(repair.CanonicalPath, repair.ThreadId, lockFile: true));
+                if (!PathSafety.Within(repair.CanonicalPath, home) || !PathSafety.Within(repair.PhysicalPath ?? repair.CanonicalPath, home))
+                    throw new IOException("Repair target is outside the shared store.");
+                pins.Add(VerifyHeader(repair.PhysicalPath ?? repair.CanonicalPath, repair.ThreadId, lockFile: true));
             }
             using var db = new NativeSqlite(database, write: true);
             db.Query("BEGIN IMMEDIATE");
@@ -153,7 +155,7 @@ public sealed class SessionStoreMaintenance
                 if (!PathSafety.Within(canonical, Path.Combine(home, folder))) throw new IOException("Path is outside the expected shared session directory.");
                 using var file = VerifyHeader(canonical, id);
                 if (managedAlias)
-                    repairs.Add(new(id, previous, canonical, archived, !File.Exists(previous)));
+                    repairs.Add(new(id, previous, canonical, archived, RolloutFile.Resolve(previous) is null, RolloutFile.Resolve(canonical)));
             }
             catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or ArgumentException)
             {
@@ -167,10 +169,9 @@ public sealed class SessionStoreMaintenance
         return new(59, count, repairs, issues);
     }
 
-    private static FileStream VerifyHeader(string path, string threadId, bool lockFile = false)
+    private static Stream VerifyHeader(string path, string threadId, bool lockFile = false)
     {
-        PathSafety.NoReparseAncestors(path);
-        var stream = new FileStream(path, FileMode.Open, FileAccess.Read, lockFile ? FileShare.Read : FileShare.ReadWrite | FileShare.Delete);
+        var stream = RolloutFile.OpenRead(path, lockFile);
         try
         {
             using var reader = new StreamReader(stream, leaveOpen: true);

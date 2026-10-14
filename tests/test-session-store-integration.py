@@ -44,7 +44,7 @@ class Rpc:
 
         threading.Thread(target=read, daemon=True).start()
         threading.Thread(target=drain, daemon=True).start()
-        self.ok("initialize", {"clientInfo": {"name": "session_store_acceptance", "version": "1.12.0"},
+        self.ok("initialize", {"clientInfo": {"name": "session_store_acceptance", "version": "1.12.1"},
                                "capabilities": {"experimentalApi": True}})
         self.process.stdin.write(json.dumps({"method": "initialized", "params": {}}) + "\n")
         self.process.stdin.flush()
@@ -90,6 +90,13 @@ def schema_only(source, target):
 def run(executable, *args):
     return subprocess.run([str(executable), *map(str, args)], capture_output=True, text=True,
                           encoding="utf-8", timeout=40, creationflags=subprocess.CREATE_NO_WINDOW)
+
+
+def compress_rollout(path):
+    from compression import zstd
+    if path.exists():
+        Path(str(path) + ".zst").write_bytes(zstd.compress(path.read_bytes()))
+        path.unlink()
 
 
 def clean(root):
@@ -157,7 +164,8 @@ def check(binary, args):
             "source": "cli", "thread_source": "user", "history_mode": "paginated", "cli_version": "0.162.1",
             "originator": "codex-tui", "model_provider": "openai", "base_instructions": {"text": ""}}}]
         canonical.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
-        original = hashlib.sha256(canonical.read_bytes()).hexdigest()
+        if args.compressed:
+            compress_rollout(canonical)
         with closing(sqlite3.connect(shared / "state_5.sqlite")) as db:
             now = int(time.time())
             db.execute("INSERT INTO backfill_state(id,status,last_success_at,updated_at) VALUES(1,'complete',?,?)", (now, now))
@@ -177,7 +185,10 @@ def check(binary, args):
         finally:
             rpc.close()
         # Resume may append lifecycle metadata; repair must preserve the resulting bytes.
-        original = hashlib.sha256(canonical.read_bytes()).hexdigest()
+        if args.compressed:
+            compress_rollout(canonical)
+        physical = Path(str(canonical) + ".zst") if args.compressed else canonical
+        original = hashlib.sha256(physical.read_bytes()).hexdigest()
         # Current resume can normalize paths itself. Recreate the persisted legacy
         # alias explicitly so this also exercises chats that were never resumed.
         with closing(sqlite3.connect(shared / "state_5.sqlite")) as db:
@@ -212,10 +223,11 @@ def check(binary, args):
         with closing(sqlite3.connect(shared / "state_5.sqlite")) as db:
             path, title = db.execute("SELECT rollout_path,title FROM threads WHERE id=?", (tid,)).fetchone()
         assert title == "Fixture title"
-        assert hashlib.sha256(Path(path).read_bytes()).hexdigest() == original
+        restored = Path(path) if Path(path).exists() else Path(path + ".zst")
+        assert hashlib.sha256(restored.read_bytes()).hexdigest() == original
         again = run(args.test_host, "--session-store-fixture-repair", app)
         assert again.returncode == 0 and json.loads(again.stdout)["changed"] == 0, again.stdout
-        print(json.dumps({"binary": str(binary), "result": "PASS", "checks": ["cross-profile read/resume without model turn", "live guard", "missing-list reproduction", "archive failure reproduction", "audit", "repair", "profile deletion", "archive/unarchive", "content hash", "idempotence"]}), flush=True)
+        print(json.dumps({"binary": str(binary), "compressed": args.compressed, "result": "PASS", "checks": ["cross-profile read/resume without model turn", "live guard", "missing-list reproduction", "archive failure reproduction", "audit", "repair", "profile deletion", "archive/unarchive", "content hash", "idempotence"]}), flush=True)
     finally:
         clean(root)
 
@@ -226,6 +238,7 @@ if __name__ == "__main__":
     parser.add_argument("--manager", type=Path, required=True)
     parser.add_argument("--test-host", type=Path, required=True)
     parser.add_argument("--codex", type=Path, action="append", required=True)
+    parser.add_argument("--compressed", action="store_true", help="Exercise .jsonl.zst storage; requires Python 3.14+")
     options = parser.parse_args()
     for executable in options.codex:
         check(executable, options)

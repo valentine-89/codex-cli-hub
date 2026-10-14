@@ -192,7 +192,9 @@ public static class RolloutStatus
         foreach (var year in Directory.EnumerateDirectories(sessions).OrderDescending())
         foreach (var month in OrdinaryChildren(year))
         foreach (var day in OrdinaryChildren(month))
-        foreach (var file in Directory.EnumerateFiles(day, "*" + threadId + "*.jsonl"))
+        foreach (var file in Directory.EnumerateFiles(day, "*" + threadId + "*.jsonl*")
+            .Where(p => p.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase) || p.EndsWith(".jsonl.zst", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(p => p.EndsWith(".zst", StringComparison.OrdinalIgnoreCase)))
         { PathSafety.NoReparseAncestors(file); return file; }
         return null;
     }
@@ -240,16 +242,27 @@ public static class RolloutStatus
     public static string? Limit(string? text) => text is null ? null : text.Length <= 4000 ? text : text[..4000];
     public static string[] Tail(string path)
     {
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-        var length = stream.Length;
-        var size = (int)Math.Min(length, 1024 * 1024);
-        stream.Seek(length - size, SeekOrigin.Begin);
-        var bytes = new byte[size];
-        var count = 0;
-        while (count < size)
-        { var read = stream.Read(bytes, count, size - count); if (read == 0) break; count += read; }
+        using var stream = RolloutFile.OpenRead(path);
+        const int capacity = 1024 * 1024;
+        var ring = new byte[capacity]; var offset = 0; long length = 0;
+        if (stream.CanSeek)
+        {
+            length = Math.Max(0, stream.Length - capacity);
+            stream.Seek(length, SeekOrigin.Begin);
+        }
+        int read;
+        while ((read = stream.Read(ring, offset, Math.Min(64 * 1024, capacity - offset))) > 0)
+        { length += read; offset = (offset + read) % capacity; }
+        var count = (int)Math.Min(length, capacity);
+        var bytes = new byte[count];
+        if (length > capacity)
+        {
+            Buffer.BlockCopy(ring, offset, bytes, 0, capacity - offset);
+            Buffer.BlockCopy(ring, 0, bytes, capacity - offset, offset);
+        }
+        else Buffer.BlockCopy(ring, 0, bytes, 0, count);
         var text = Encoding.UTF8.GetString(bytes, 0, count);
-        if (length > size) { var newline = text.IndexOf('\n'); text = newline < 0 ? "" : text[(newline + 1)..]; }
+        if (length > capacity) { var newline = text.IndexOf('\n'); text = newline < 0 ? "" : text[(newline + 1)..]; }
         // Discard an incomplete final record while the CLI is writing it.
         var end = text.LastIndexOf('\n');
         return end < 0 ? [] : text[..end].Split('\n', StringSplitOptions.RemoveEmptyEntries);
@@ -259,12 +272,12 @@ public static class RolloutStatus
         var path = Find(sharedHome, threadId);
         if (path is null) return null;
         // Context may precede a large tool output. Stream without retaining the history.
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var stream = RolloutFile.OpenRead(path);
         using var reader = new StreamReader(stream);
         JsonElement? context = null;
         while (reader.ReadLine() is { } line)
         {
-            if (!line.Contains("\"type\":\"turn_context\"", StringComparison.Ordinal)) continue;
+            if (!line.Contains("\"turn_context\"", StringComparison.Ordinal)) continue;
             try
             {
                 using var doc = JsonDocument.Parse(line);

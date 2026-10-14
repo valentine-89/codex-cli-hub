@@ -1,6 +1,8 @@
 using CodexAccountManager.Core;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text;
+using ZstdSharp;
 
 internal static class SessionStoreTests
 {
@@ -128,6 +130,66 @@ internal static class SessionStoreTests
             Check(before.SequenceEqual(SHA256.HashData(File.ReadAllBytes(Path.Combine(f.Home, "state_5.sqlite")))), "Audit wrote database");
             Check(f.Path(session.ThreadId) == session.PreviousPath, "Audit repaired a path");
         });
+        Test("compressed rollout audit and repair preserve compressed bytes and logical database paths", () =>
+        {
+            var f = new StoreFixture(testRoot); var profile = f.Profile();
+            var active = f.Thread(profile); var archived = f.Thread(profile, archived: true);
+            Compress(active.CanonicalPath); Compress(archived.CanonicalPath);
+            new JunctionService().Remove(Path.Combine(profile, "sessions"), Path.Combine(f.Home, "sessions"));
+            var bytes = File.ReadAllBytes(active.CanonicalPath + ".zst"); var metadata = f.UnrelatedColumns();
+            var audit = f.Service.Audit();
+            Check(audit.Issues.Count == 0 && audit.Repairs.Count == 2 && audit.BrokenPaths == 1, "Compressed files treated as missing");
+            Check(audit.Repairs.All(r => r.PhysicalPath == r.CanonicalPath + ".zst"), "Physical path unavailable to verifier");
+            Check(f.Service.Repair(audit) == 2 && f.Path(active.ThreadId) == active.CanonicalPath, "Logical path not canonicalized");
+            Check(!File.Exists(active.CanonicalPath) && bytes.SequenceEqual(File.ReadAllBytes(active.CanonicalPath + ".zst")), "Transcript was materialized or rewritten");
+            Check(metadata == f.UnrelatedColumns() && f.Service.Audit().Issues.Count == 0 && f.Service.Repair(f.Service.Audit()) == 0, "Compressed repair changed metadata or is not idempotent");
+        });
+        Test("compressed mismatch and invalid frames block repair without partial updates", () =>
+        {
+            var f = new StoreFixture(testRoot); var p = f.Profile(); var good = f.Thread(p); var bad = f.Thread(p);
+            File.WriteAllText(bad.CanonicalPath, JsonSerializer.Serialize(new { type = "session_meta", payload = new { id = Guid.NewGuid().ToString() } }));
+            Compress(bad.CanonicalPath);
+            Check(f.Service.Audit().Issues.Single().Reason.Contains("ID"), "Compressed identity not checked");
+            Reject(() => f.Service.Repair(f.Service.Audit()));
+            File.WriteAllText(bad.CanonicalPath + ".zst", "not a Zstandard frame");
+            Check(f.Service.Audit().Issues.Count == 1, "Invalid frame accepted");
+            Reject(() => f.Service.Repair(f.Service.Audit()));
+            Check(f.Path(good.ThreadId) == good.PreviousPath, "Partial repair after compressed-file failure");
+        });
+        Test("compression transition after audit rejects stale physical file assumptions", () =>
+        {
+            var f = new StoreFixture(testRoot); var session = f.Thread(f.Profile()); var audit = f.Service.Audit();
+            Compress(session.CanonicalPath);
+            Reject(() => f.Service.Repair(audit));
+            Check(f.Path(session.ThreadId) == session.PreviousPath, "Stale audit wrote database");
+        });
+        Test("compressed session status and saved context match the plain transcript", () =>
+        {
+            var f = new StoreFixture(testRoot); var session = f.Thread(f.Profile());
+            File.AppendAllText(session.CanonicalPath, JsonSerializer.Serialize(new { type = "turn_context", payload = new { model = "fixture-model", effort = "high", approval_policy = "never" } }) + "\n"
+                + JsonSerializer.Serialize(new { timestamp = "2026-10-14T00:00:00Z", type = "event_msg", payload = new { type = "task_complete", last_agent_message = "fixture result" } }) + "\n");
+            var context = RolloutStatus.LastContext(f.Home, session.ThreadId)!.Value.GetRawText();
+            var status = JsonSerializer.Serialize(RolloutStatus.Read(f.Home, session.ThreadId));
+            Compress(session.CanonicalPath);
+            Check(RolloutStatus.Find(f.Home, session.ThreadId) == session.CanonicalPath + ".zst", "Compressed chat cannot be resumed");
+            Check(RolloutStatus.LastContext(f.Home, session.ThreadId)!.Value.GetRawText() == context, "Saved policy/model changed");
+            Check(JsonSerializer.Serialize(RolloutStatus.Read(f.Home, session.ThreadId)) == status, "Completion state changed");
+            File.WriteAllText(session.CanonicalPath, "new live transcript\n");
+            Check(RolloutStatus.Find(f.Home, session.ThreadId) == session.CanonicalPath, "Stale compressed copy preferred over live file");
+        });
+        Test("compressed tail stays bounded and drops partial records", () =>
+        {
+            var f = new StoreFixture(testRoot); var session = f.Thread(f.Profile());
+            File.WriteAllText(session.CanonicalPath, new string('x', 2 * 1024 * 1024) + "\ncomplete\npartial");
+            var plain = RolloutStatus.Tail(session.CanonicalPath); Compress(session.CanonicalPath);
+            Check(plain.SequenceEqual(RolloutStatus.Tail(session.CanonicalPath + ".zst")) && plain.SequenceEqual(new[] { "complete" }), "Compressed tail includes truncated data");
+        });
+    }
+    private static void Compress(string path)
+    {
+        using var compressor = new Compressor();
+        File.WriteAllBytes(path + ".zst", compressor.Wrap(File.ReadAllBytes(path)).ToArray());
+        File.Delete(path);
     }
     private static void Check(bool condition, string message) { if (!condition) throw new Exception(message); }
     private static void Reject(Action action) { try { action(); } catch (IOException) { return; } throw new Exception("Unsafe operation succeeded"); }

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.12.1 — 2026-10-14
+
+- Recognize idle rollouts compressed as `.jsonl.zst` while SQLite retains logical `.jsonl` paths. Stream-decode audit metadata, session status and saved context without creating disk copies; resume preflights now find compressed chats.
+- Preserve logical paths during repair, pin/hash the physical compressed files, and reject corrupt frames, mismatched IDs or compression races. Keep the current RPC discovery contract and schema guards.
+- Record Manager version on GUI startup and sanitized startup failure diagnostics. Embed ZstdSharp.Port and its license notice in the single portable executable.
+
 ## 1.12.0 — 2026-10-13
 
 - Prevent disappearing chats and `no rollout found` archive failures after account deletion by verifying and canonicalizing shared SQLite rollout paths before detaching profile junctions.

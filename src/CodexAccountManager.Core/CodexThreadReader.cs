@@ -34,7 +34,7 @@ public sealed class CodexThreadReader(Logger? logger = null)
         var version = "unknown";
         try
         {
-            await Send(new { id = 1, method = "initialize", @params = new { clientInfo = new { name = "codex_account_manager", version = "1.12.0" } } });
+            await Send(new { id = 1, method = "initialize", @params = new { clientInfo = new { name = "codex_account_manager", version = "1.12.1" } } });
             var initialized = await Receive(1);
             var match = System.Text.RegularExpressions.Regex.Match(Text(initialized, "userAgent") ?? "", @"^[^/\s]+/([0-9][0-9A-Za-z.+-]{0,63})(?:\s|$)");
             if (match.Success) version = match.Groups[1].Value;

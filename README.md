@@ -7,6 +7,10 @@ Từ **v1.11.0**, app có MCP điều khiển quota và phiên CLI qua stdio/nam
 Không cần computer-use hoặc mở khóa màn hình. Khi GUI đóng, bridge chạy nền; máy vẫn cần bật và không sleep.
 Cài bằng `pwsh -File ./scripts/install-mcp.ps1`.
 
+**v1.12.1:** nhận diện hội thoại nén `.jsonl.zst` trong kiểm tra kho phiên, Resume, trạng thái
+và ngữ cảnh phiên. Đọc giải nén trực tiếp trong bộ nhớ, không tạo bản JSONL phụ trên ổ đĩa.
+Log khởi động có phiên bản Manager và mã lỗi để chẩn đoán trường hợp không mở được app.
+
 **v1.12.0:** sửa nguyên nhân mất phiên và archive lỗi sau khi xóa account: chuẩn hóa tham chiếu
 SQLite về kho chung trước khi gỡ junction. Có lệnh kiểm tra/sửa kho phiên; API lỗi giữ danh sách
 thành công gần nhất và báo chưa cập nhật, không tự đọc danh sách JSONL thay thế.
@@ -254,11 +258,14 @@ Không dùng `Directory.Delete(path, true)` hoặc recursive delete qua junction
 **Trước khi xóa cả thư mục portable, Delete từng account trong app.** Chỉ sau khi tháo hết
 junction mới xóa thư mục app. Không giả định mọi công cụ recursive delete đều an toàn với junction.
 
-## Kiểm tra và sửa đường dẫn phiên (1.12.0)
+## Kiểm tra và sửa đường dẫn phiên (1.12.1)
 
 Phạm vi đã kiểm thử: CLI **0.162.1**, Desktop backend **0.162.0-alpha.17.2**, `state_5.sqlite`
 đến migration **59**. Dùng `winsqlite3.dll` có sẵn trên Windows; không cần Python hoặc SQLite CLI.
 Schema/database/trigger không nhận diện được sẽ chặn ghi, không tự chọn tương thích bản cũ.
+Codex có thể giữ đường dẫn `.jsonl` trong SQLite dù file trên đĩa đã thành `.jsonl.zst`.
+Manager kiểm tra cả hai dạng, ưu tiên JSONL đang hoạt động; định dạng nén không bị coi là mất file.
+ZstdSharp.Port 0.8.8 được nhúng vào EXE, không cần cài thêm runtime giải nén.
 
 ```powershell
 # Chỉ đọc; trả JSON, số đường dẫn qua profile, số file mất qua alias và các lỗi cần xem xét.
@@ -276,13 +283,13 @@ nhập lịch sử cũ để chữa lỗi đường dẫn này. Lệnh sửa ki�
 `--verify-api` kiểm tra lại danh sách qua RPC sau sửa và chỉ dùng cùng lệnh sửa.
 Log chỉ giữ phương thức, mã lỗi và phiên bản Codex, không giữ raw RPC error hay nội dung hội thoại.
 
-Khi executable đang dùng, publish vào `versions/1.12.0`, đăng ký MCP trỏ bản đó với `--root`
+Khi executable đang dùng, publish vào `versions/1.12.1`, đăng ký MCP trỏ bản đó với `--root`
 thư mục portable. Kết nối đã mở vẫn dùng tiến trình cũ đến khi đóng/mở lại. Có thể chạy
 `scripts/finish-update.ps1` bằng PowerShell 7 với các tham số `-Root`, `-Source` (EXE đã stage
-trong `versions/1.12.0`) và `-Sha256` để chờ tối đa 24 giờ. Helper không dừng process; khi Desktop,
+trong `versions/1.12.1`) và `-Sha256` để chờ tối đa 24 giờ. Helper không dừng process; khi Desktop,
 CLI và Manager đều đã đóng, nó sửa/kiểm tra đường dẫn, đối chiếu hash JSONL và API, cập nhật EXE
-gốc rồi đăng ký MCP cùng bản. Trạng thái ở `logs/update-1.12.0.json`, kết quả sửa ở
-`logs/session-store-repair-1.12.0.json`. Nếu hết thời gian hoặc lỗi, xem trạng thái rồi chạy lại.
+gốc rồi đăng ký MCP cùng bản. Trạng thái ở `logs/update-1.12.1.json`, kết quả sửa ở
+`logs/session-store-repair-1.12.1.json`. Nếu hết thời gian hoặc lỗi, xem trạng thái rồi chạy lại.
 
 ## Recovery thủ công
 
@@ -327,8 +334,8 @@ Manager sẽ từ chối đoán tiếp nếu junction thiếu. Không bấm recu
 
 ## Build, tests, publish
 
-Cần .NET 8 SDK và PowerShell 7. Không cần Visual Studio, Node dependency cho manager,
-database hoặc test framework từ NuGet. Integration tests chạy trên Windows NTFS và dùng CLI/Pwsh
+Cần .NET 8 SDK và PowerShell 7. Build khôi phục ZstdSharp.Port 0.8.8 từ NuGet để đọc Zstandard;
+không cần Visual Studio, SQLite package hay test framework từ NuGet. Integration tests chạy trên Windows NTFS và dùng CLI/Pwsh
 được cài trên máy. Fixture chỉ chứa dữ liệu giả trong thư mục test riêng và được dọn không theo junction.
 
 ```powershell
@@ -356,6 +363,7 @@ pwsh -File ./scripts/package.ps1
 ```
 
 ZIP được ghi vào `dist/releases`; script kiểm tra chỉ có một EXE và đối chiếu SHA-256 với bản build.
+Giấy phép phụ thuộc được nhúng trong EXE và ghi tại [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 Test bao gồm junction thật, độc lập profile, sentinel sống sau Delete, missing/broken/wrong link,
 thư mục thật, nested junction, ancestor junction, traversal, atomic JSON và khóa manager,

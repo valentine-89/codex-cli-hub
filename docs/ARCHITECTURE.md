@@ -126,6 +126,16 @@ updates and repeated idle checks protect the complete batch; only `rollout_path`
 deletion runs this guard before detaching either junction. Active `codex` or `ChatGPT` processes block
 writes/deletion conservatively even if they use another home; no client is terminated.
 
+Since 1.12.1, `RolloutFile` resolves a logical `.jsonl` to its existing `.jsonl.zst` sibling when
+needed, preferring a live plain file if both exist. Managed ZstdSharp.Port 0.8.8 decodes a read-only
+stream without materializing files on disk; decoding errors become bounded I/O diagnostics.
+The audit retains the logical canonical database path and reports the physical file separately.
+Repair pins/verifies that physical file and detects compression changes between audit and commit.
+Session discovery remains RPC-based; local status/context readers and resume preflights also support
+compressed rollouts. Tail reads retain only the last 1 MiB of decompressed bytes. Unknown/corrupt
+compression cannot pass identity verification. Startup errors log type/HResult/executable, while
+successful GUI startup records its version; credentials and raw error responses are excluded.
+
 `scripts/finish-update.ps1` is a one-shot offline helper: it waits for Codex and Manager processes to
 exit, verifies the staged release hash, repairs, compares transcript hashes and checks API visibility,
 then promotes the portable executable and updates MCP registration. It records local status/results

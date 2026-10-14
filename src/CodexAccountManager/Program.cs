@@ -84,6 +84,8 @@ internal static class Program
         }
         catch (Exception ex)
         {
+            try { new Logger(root).Write("startup-failed:" + ex.GetType().Name, Environment.ProcessPath, ex.HResult); }
+            catch (Exception) { /* Diagnostics must not hide the original startup error. */ }
             if (background) Console.Error.WriteLine(AutomationErrors.Safe(ex));
             else MessageBox.Show($"Cannot open Codex Account Manager.\n\n{ex.Message}\n\nCheck folder permissions and whether another manager is open. Existing data was not reset.",
                 "Codex Account Manager", MessageBoxButtons.OK, MessageBoxIcon.Error);

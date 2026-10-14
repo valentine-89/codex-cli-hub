@@ -1,4 +1,37 @@
-# Validation — v1.12.0, 2026-10-13
+# Validation — v1.12.1, 2026-10-14
+
+- **80/80 .NET tests and 4/4 Python maintenance tests passed.** Release single-file publish completed
+  without warnings/errors. Packaged MCP handshake reports 1.12.1 with the same 16 tools, excludes
+  private fields and exits on EOF. Only the test-owned synthetic bridge was stopped.
+- Both installed binaries, **CLI 0.162.1** and **Desktop backend 0.162.0-alpha.17.2**, passed the full
+  schema-only integration scenario with plain and compressed rollouts (four combinations). This
+  covers cross-profile read/resume, missing-list/archive-error reproduction, production idle guard,
+  repair, safe profile deletion, Manager discovery, archive/unarchive and idempotence. No model turn
+  or account authentication was used. Compressed transcript hashes remained unchanged by repair.
+- Added regression coverage for compressed active/archived files, incorrect metadata IDs, invalid
+  frames, compression between audit and repair, preserved context/status, preference for a live plain
+  file and a bounded tail that discards partial records. Existing rollback/schema/path checks still pass.
+- Read-only live inspection found **156 threads, 129 compressed transcripts and 27 plain transcripts**.
+  SQLite still stores logical `.jsonl` paths for compressed `.jsonl.zst` files. Version 1.12.0 incorrectly
+  reported those 129 files missing. Version 1.12.1 audit reports **12 profile aliases, 6 broken aliases,
+  zero validation issues**; all 12 canonical compressed files have matching metadata IDs. A user resume
+  normalized one of the previous 13 aliases. State migration remains 59 and history migration 8;
+  both SQLite `quick_check` results are `ok`, with no failed migration found.
+- The installed 1.11.2 GUI opened successfully. The user confirmed closing the window manually after
+  Resume, so an automatic exit/startup crash has **not** been reproduced. Isolated 1.11.2/1.12.0 startup
+  and headless-host handoff checks passed. The packaged 1.12.1 GUI also passed isolated startup,
+  rendering and automatic close; its startup log identifies version 1.12.1. Sanitized startup failure
+  logging is available for further diagnosis.
+- **Live path repair remains pending while Codex/Manager clients run.** The prior 1.12.0 helper expired
+  after its 24-hour wait without modifying the database. The 1.12.1 helper verifies physical compressed
+  file hashes and waits for clients to close before repair. Portable executable promotion can proceed
+  separately once the old GUI executable is released. No real conversation was archived for testing.
+
+Run the integration command below once without and once with `--compressed` (Python 3.14 is required
+for the compressed fixture generator). Decompression in the shipped Manager uses managed C# code,
+does not require Python and does not expand or replace transcript files on disk.
+
+## Previous validation — v1.12.0, 2026-10-13
 
 - **75/75 .NET tests and 4/4 existing Python maintenance tests passed.** Release build and
   single-file publish completed without warnings/errors. Packaged MCP handshake exposes the same
@@ -193,7 +226,7 @@ Release ZIP contains only the executable; local profiles and account metadata ar
 
 ## Current executable SHA-256
 ```text
-835CA1781057BAFE13C14016C796D592424C22E8C00D21762105D27612A23EAC
+EF56CE089C71BED33E96E67391BB204FA16BF0C96CD2AEC3F7722D0B4E2BBA7B
 ```
 
 Protocol source: https://learn.chatgpt.com/docs/app-server

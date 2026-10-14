@@ -48,7 +48,7 @@ public sealed class MainForm : Form
         }, async () => { if (dependencies.NativeCodex is null) await RefreshDependencies(); return dependencies; }, Environment.ProcessPath!);
         if (!File.Exists(Path.Combine(repository.Root, "accounts.json"))) repository.SaveAccounts(accounts);
         if (!File.Exists(Path.Combine(repository.Root, "settings.json"))) repository.SaveSettings(settings);
-        logger.Write("startup", repository.Root);
+        logger.Write("startup:" + typeof(MainForm).Assembly.GetName().Version, repository.Root);
         Text = "Codex Account Manager"; Icon = Theme.Icon; Font = new Font("Segoe UI", 9.5f);
         BackColor = Theme.Background; ForeColor = Theme.Ink;
         ClientSize = Theme.Scale(new Size(940, 565));

@@ -11,9 +11,9 @@ $ErrorActionPreference = 'Stop'
 $portableRoot = [IO.Path]::GetFullPath($Root).TrimEnd('\')
 $sourcePath = [IO.Path]::GetFullPath($Source)
 $targetPath = Join-Path $portableRoot 'CodexAccountManager.exe'
-$statusPath = Join-Path $portableRoot 'logs/update-1.12.0.json'
-$repairPath = Join-Path $portableRoot 'logs/session-store-repair-1.12.0.json'
-if (-not $sourcePath.StartsWith($portableRoot + '\versions\1.12.0\', [StringComparison]::OrdinalIgnoreCase) -or
+$statusPath = Join-Path $portableRoot 'logs/update-1.12.1.json'
+$repairPath = Join-Path $portableRoot 'logs/session-store-repair-1.12.1.json'
+if (-not $sourcePath.StartsWith($portableRoot + '\versions\1.12.1\', [StringComparison]::OrdinalIgnoreCase) -or
     [IO.Path]::GetFileName($sourcePath) -ne 'CodexAccountManager.exe') { throw 'Invalid staged release path.' }
 function Assert-OrdinaryPath([string]$Path) {
     for ($candidate = [IO.Path]::GetFullPath($Path); $candidate; $candidate = [IO.Path]::GetDirectoryName($candidate)) {
@@ -33,7 +33,7 @@ function Write-JsonAtomic([string]$Path, $Value) {
     } finally { if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary } }
 }
 function Status([string]$State, [string]$Detail) {
-    Write-JsonAtomic $statusPath @{version='1.12.0';state=$State;detail=$Detail;at=[DateTimeOffset]::UtcNow.ToString('O');helperPid=$PID}
+    Write-JsonAtomic $statusPath @{version='1.12.1';state=$State;detail=$Detail;at=[DateTimeOffset]::UtcNow.ToString('O');helperPid=$PID}
 }
 function Invoke-Maintenance([string[]]$Arguments) {
     Assert-OrdinaryPath $sourcePath
@@ -64,14 +64,14 @@ try {
     if ($before.audit.issues.Count -gt 0) { throw 'Session store audit requires manual review.' }
     $hashes = @{}
     foreach ($repair in $before.audit.repairs) {
-        Assert-OrdinaryPath $repair.canonicalPath
-        $hashes[$repair.threadId] = (Get-FileHash -LiteralPath $repair.canonicalPath -Algorithm SHA256).Hash
+        Assert-OrdinaryPath $repair.physicalPath
+        $hashes[$repair.threadId] = (Get-FileHash -LiteralPath $repair.physicalPath -Algorithm SHA256).Hash
     }
     $result = Invoke-Maintenance -Arguments @('--session-store-repair','--verify-api')
     Write-JsonAtomic $repairPath $result
     if ($result.after.repairs.Count -ne 0 -or $result.after.issues.Count -ne 0) { throw 'Post-repair audit did not pass.' }
     foreach ($repair in $before.audit.repairs) {
-        if ((Get-FileHash -LiteralPath $repair.canonicalPath -Algorithm SHA256).Hash -ne $hashes[$repair.threadId]) { throw 'Transcript changed during verification.' }
+        if ((Get-FileHash -LiteralPath $repair.physicalPath -Algorithm SHA256).Hash -ne $hashes[$repair.threadId]) { throw 'Transcript changed during verification.' }
         if (-not $repair.archived -and $repair.threadId -notin $result.visibleSessionIds) { throw 'A repaired active thread is still missing from the API list.' }
     }
     if (@(Get-Process -Name codex,ChatGPT,CodexAccountManager -ErrorAction SilentlyContinue).Count -gt 0) { throw 'Applications reopened. Data repair finished; executable promotion postponed.' }
