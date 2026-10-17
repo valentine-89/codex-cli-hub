@@ -107,11 +107,11 @@ internal static class SessionStoreTests
         Test("unknown schema and custom triggers block writes", () =>
         {
             var f = new StoreFixture(testRoot); var session = f.Thread(f.Profile());
-            using (var db = f.Db()) db.Query("INSERT INTO _sqlx_migrations VALUES(60,1)");
+            using (var db = f.Db()) db.Query("INSERT INTO _sqlx_migrations VALUES(62,1)");
             Reject(() => f.Service.Audit());
             using (var db = f.Db())
             {
-                db.Query("DELETE FROM _sqlx_migrations WHERE version=60");
+                db.Query("DELETE FROM _sqlx_migrations WHERE version=62");
                 db.Query("CREATE TRIGGER unexpected AFTER UPDATE ON threads BEGIN UPDATE threads SET title='changed' WHERE id=NEW.id; END");
             }
             Reject(() => f.Service.Audit()); Check(f.Path(session.ThreadId) == session.PreviousPath, "Unknown schema was modified");
@@ -121,6 +121,83 @@ internal static class SessionStoreTests
                 db.Query("CREATE TRIGGER threads_created_at_ms_after_update AFTER UPDATE ON threads BEGIN UPDATE threads SET title='changed' WHERE id=NEW.id; END");
             }
             Reject(() => f.Service.Audit());
+        });
+        Test("schema 60 and 61 repair paths without changing read state or metadata", () =>
+        {
+            foreach (var version in new[] { 60, 61 })
+            {
+                var f = new StoreFixture(testRoot); var session = f.Thread(f.Profile()); Compress(session.CanonicalPath);
+                using (var db = f.Db())
+                {
+                    for (var v = 60; v <= version; v++) db.Query("INSERT INTO _sqlx_migrations VALUES(?,1)", v.ToString());
+                    db.Query("CREATE TABLE guardian_review_feedback(id TEXT PRIMARY KEY NOT NULL,thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,record BLOB NOT NULL)");
+                    db.Query("INSERT INTO guardian_review_feedback VALUES('fixture',?,X'0102')", session.ThreadId);
+                    if (version == 61)
+                    {
+                        db.Query("CREATE TABLE thread_read_receipts(thread_id TEXT PRIMARY KEY NOT NULL,first_unread_turn TEXT,revision TEXT NOT NULL,last_published_turn TEXT)");
+                        db.Query("INSERT INTO thread_read_receipts VALUES(?,'unread','keep revision','published')", session.ThreadId);
+                    }
+                }
+                var before = f.UnrelatedColumns(); var audit = f.Service.Audit();
+                Check(audit.SchemaVersion == version && audit.Issues.Count == 0, "Actual schema version not reported");
+                Check(f.Service.Repair(audit) == 1 && f.Service.Repair(f.Service.Audit()) == 0, "New schema repair failed");
+                Check(f.UnrelatedColumns() == before, "Non-path metadata changed");
+                using var check = f.Db();
+                Check(check.Query("SELECT hex(record) FROM guardian_review_feedback").Single()[0] == "0102", "Guardian feedback changed");
+                if (version == 61) Check(check.Query("SELECT revision FROM thread_read_receipts").Single()[0] == "keep revision", "Read state changed");
+            }
+        });
+        Test("failed migration and supported migration change reject writes", () =>
+        {
+            var f = new StoreFixture(testRoot); var session = f.Thread(f.Profile()); var audit = f.Service.Audit();
+            using (var db = f.Db()) db.Query("INSERT INTO _sqlx_migrations VALUES(60,0)");
+            Reject(() => f.Service.Audit());
+            using (var db = f.Db()) db.Query("UPDATE _sqlx_migrations SET success=1 WHERE version=60");
+            Reject(() => f.Service.Repair(audit));
+            Check(f.Path(session.ThreadId) == session.PreviousPath, "Stale schema audit updated path");
+        });
+        Test("offline account deletion preserves other accounts and compressed shared history on schema 61", () =>
+        {
+            var f = new StoreFixture(testRoot); var a = f.Profile(); var b = f.Profile(); var session = f.Thread(a); Compress(session.CanonicalPath);
+            using (var db = f.Db()) { db.Query("INSERT INTO _sqlx_migrations VALUES(60,1)"); db.Query("INSERT INTO _sqlx_migrations VALUES(61,1)"); }
+            var selected = new Account { Id = Path.GetFileName(a), ProfilePath = Path.Combine("profiles", Path.GetFileName(a)), DisplayName = "selected@example.test" };
+            var other = new Account { Id = Path.GetFileName(b), ProfilePath = Path.Combine("profiles", Path.GetFileName(b)), DisplayName = "other@example.test" };
+            var repository = new AccountRepository(f.Root);
+            repository.SaveAccounts(new() { Accounts = [selected, other] }); repository.SaveSettings(new() { DefaultCodexHome = f.Home });
+            File.WriteAllText(Path.Combine(a, "auth.json"), "fixture credential");
+            File.WriteAllText(Path.Combine(b, "auth.json"), "other credential");
+            var cache = Path.Combine(a, ".tmp", "plugins-clone-fixture", ".git", "objects", "pack"); Directory.CreateDirectory(cache);
+            var readOnly = Path.Combine(cache, "fixture.idx"); File.WriteAllText(readOnly, "private plugin cache");
+            File.SetAttributes(readOnly, File.GetAttributes(readOnly) | FileAttributes.ReadOnly);
+            File.SetAttributes(session.CanonicalPath + ".zst", File.GetAttributes(session.CanonicalPath + ".zst") | FileAttributes.ReadOnly);
+            var before = File.ReadAllBytes(session.CanonicalPath + ".zst");
+            try
+            {
+                new AccountDeletion(repository, () => { }).Delete(selected.Id, selected.DisplayName);
+                Check((File.GetAttributes(session.CanonicalPath + ".zst") & FileAttributes.ReadOnly) != 0, "Shared file attributes changed");
+            }
+            finally
+            {
+                if (File.Exists(readOnly)) File.SetAttributes(readOnly, FileAttributes.Normal);
+                File.SetAttributes(session.CanonicalPath + ".zst", FileAttributes.Normal);
+            }
+            Check(!Directory.Exists(a) && repository.LoadAccounts().Accounts.Single().Id == other.Id, "Wrong account removed");
+            Check(File.ReadAllText(Path.Combine(b, "auth.json")) == "other credential", "Other credentials changed");
+            Check(f.Path(session.ThreadId) == session.CanonicalPath && before.SequenceEqual(File.ReadAllBytes(session.CanonicalPath + ".zst")), "Shared chat lost");
+        });
+        Test("offline deletion rejects wrong identity, active clients and locked manager", () =>
+        {
+            var f = new StoreFixture(testRoot); var p = f.Profile(); var session = f.Thread(p);
+            var account = new Account { Id = Path.GetFileName(p), ProfilePath = Path.Combine("profiles", Path.GetFileName(p)), DisplayName = "selected@example.test" };
+            var repository = new AccountRepository(f.Root);
+            repository.SaveAccounts(new() { Accounts = [account] }); repository.SaveSettings(new() { DefaultCodexHome = f.Home });
+            var service = new AccountDeletion(repository, () => { });
+            Reject(() => service.Delete("../invalid", account.DisplayName));
+            Reject(() => service.Delete(Guid.NewGuid().ToString("N"), account.DisplayName));
+            Reject(() => service.Delete(account.Id, "different@example.test"));
+            using (var appLock = repository.AcquireLock()) Reject(() => service.Delete(account.Id, account.DisplayName));
+            Reject(() => new AccountDeletion(repository, () => throw new IOException("active client")).Delete(account.Id, account.DisplayName));
+            Check(Directory.Exists(p) && repository.LoadAccounts().Accounts.Count == 1 && f.Path(session.ThreadId) == session.PreviousPath, "Rejected deletion modified data");
         });
         Test("audit does not change database or session files", () =>
         {

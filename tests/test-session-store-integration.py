@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import queue
 import sqlite3
+import stat
 import subprocess
 import tempfile
 import threading
@@ -44,7 +45,7 @@ class Rpc:
 
         threading.Thread(target=read, daemon=True).start()
         threading.Thread(target=drain, daemon=True).start()
-        self.ok("initialize", {"clientInfo": {"name": "session_store_acceptance", "version": "1.12.1"},
+        self.ok("initialize", {"clientInfo": {"name": "session_store_acceptance", "version": "1.12.2"},
                                "capabilities": {"experimentalApi": True}})
         self.process.stdin.write(json.dumps({"method": "initialized", "params": {}}) + "\n")
         self.process.stdin.flush()
@@ -115,6 +116,8 @@ def clean(root):
         assert path.resolve().is_relative_to(root.resolve()), path
         for attempt in range(20):
             try:
+                if path.stat().st_file_attributes & stat.FILE_ATTRIBUTE_READONLY:
+                    path.chmod(stat.S_IWRITE)
                 path.unlink()
                 break
             except PermissionError:
@@ -141,6 +144,7 @@ def check(binary, args):
     app.mkdir()
     (app / "profiles").mkdir()
     shared.mkdir()
+    (shared / "config.toml").write_text("[features]\nplugins = false\n", encoding="utf-8")
     for name in ("sessions", "archived_sessions"):
         (shared / name).mkdir()
     (app / "settings.json").write_text(json.dumps({"version": 1, "defaultCodexHome": str(shared), "workingDirectory": str(root)}))
@@ -150,11 +154,15 @@ def check(binary, args):
         profiles = [app / "profiles" / uuid.uuid4().hex for _ in range(2)]
         for profile in profiles:
             profile.mkdir()
+            (profile / "config.toml").write_text("[features]\nplugins = false\n", encoding="utf-8")
             for name in ("sessions", "archived_sessions"):
                 # Values are arguments, never interpolated shell code.
                 result = run("pwsh", "-NoProfile", "-CommandWithArgs", "New-Item -ItemType Junction -Path $args[0] -Target $args[1] | Out-Null",
                              str(profile / name), str(shared / name))
                 assert result.returncode == 0, result.stderr
+        (app / "accounts.json").write_text(json.dumps({"version": 1, "accounts": [{
+            "id": profiles[1].name, "displayName": "fixture", "profilePath": "profiles/" + profiles[1].name,
+            "sharedSessions": True}]}))
         tid = str(uuid.uuid4())
         relative = Path("2026/10/13") / ("rollout-2026-10-13T00-00-00-" + tid + ".jsonl")
         canonical, alias = shared / "sessions" / relative, profiles[0] / "sessions" / relative
@@ -181,6 +189,11 @@ def check(binary, args):
             # Production repair must reject even this synthetic database while a client is running.
             blocked = run(args.manager, "--root", app, "--session-store-repair")
             assert blocked.returncode != 0 and "Close Codex" in blocked.stderr, (blocked.stdout, blocked.stderr)
+            blocked_delete = run(args.manager, "--root", app, "--delete-account", profiles[1].name, "--expected-account-name", "fixture")
+            assert blocked_delete.returncode != 0 and "Close Codex" in blocked_delete.stderr, (blocked_delete.stdout, blocked_delete.stderr)
+            wrong_name = run(args.manager, "--root", app, "--delete-account", profiles[1].name, "--expected-account-name", "wrong fixture")
+            assert wrong_name.returncode != 0 and "name changed" in wrong_name.stderr
+            assert profiles[1].exists() and len(json.loads((app / "accounts.json").read_text())["accounts"]) == 1
             rpc.ok("thread/resume", {"threadId": tid, "cwd": str(root), "approvalPolicy": "never", "sandbox": "read-only"})
         finally:
             rpc.close()
@@ -197,6 +210,7 @@ def check(binary, args):
         # Reproduce the old deletion defect, leaving the shared transcript untouched.
         (profiles[0] / "sessions").rmdir()
         (profiles[0] / "archived_sessions").rmdir()
+        (profiles[0] / "config.toml").unlink()
         profiles[0].rmdir()
         rpc = Rpc(binary, profiles[1], shared)
         try:
@@ -211,6 +225,7 @@ def check(binary, args):
         assert repaired.returncode == 0, (repaired.stdout, repaired.stderr)
         assert json.loads(repaired.stdout)["changed"] == 1
         assert not profiles[1].exists()
+        assert json.loads((app / "accounts.json").read_text())["accounts"] == []
         listed = run(args.test_host, "--session-store-fixture-list", app, binary)
         assert listed.returncode == 0 and tid in json.loads(listed.stdout), (listed.stdout, listed.stderr)
         rpc = Rpc(binary, shared, shared)

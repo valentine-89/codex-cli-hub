@@ -126,6 +126,16 @@ updates and repeated idle checks protect the complete batch; only `rollout_path`
 deletion runs this guard before detaching either junction. Active `codex` or `ChatGPT` processes block
 writes/deletion conservatively even if they use another home; no client is terminated.
 
+Since 1.12.2, verified state migrations 59–61 are accepted while the required columns and trigger
+guards remain enforced. Migrations 60/61 add guardian feedback and read receipts; neither requires
+rewriting threads or history. Audit reports the actual migration, and repair rejects a migration
+change since audit. Unsupported versions and failed migrations stop maintenance before mutation.
+`--delete-account` requires an exact ID plus expected name and an exclusive account-store lock;
+it invokes the same guarded profile deletion and removes only that account's metadata. The optional
+deferred helper deletion runs only after clients close. No account deletion is exposed through MCP.
+Private read-only plugin/Git cache files have only their read-only flag cleared before deletion, inside
+the pinned and validated profile tree after shared junctions are detached. Shared file attributes stay unchanged.
+
 Since 1.12.1, `RolloutFile` resolves a logical `.jsonl` to its existing `.jsonl.zst` sibling when
 needed, preferring a live plain file if both exist. Managed ZstdSharp.Port 0.8.8 decodes a read-only
 stream without materializing files on disk; decoding errors become bounded I/O diagnostics.

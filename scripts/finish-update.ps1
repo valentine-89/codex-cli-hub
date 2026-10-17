@@ -5,15 +5,19 @@ param(
     [Parameter(Mandatory)][string]$Source,
     [Parameter(Mandatory)][string]$Sha256,
     [string]$Codex = 'codex',
-    [ValidateRange(1,168)][int]$WaitHours = 24
+    [ValidateRange(1,168)][int]$WaitHours = 24,
+    [string]$DeleteAccountId,
+    [string]$ExpectedAccountName
 )
 $ErrorActionPreference = 'Stop'
 $portableRoot = [IO.Path]::GetFullPath($Root).TrimEnd('\')
 $sourcePath = [IO.Path]::GetFullPath($Source)
 $targetPath = Join-Path $portableRoot 'CodexAccountManager.exe'
-$statusPath = Join-Path $portableRoot 'logs/update-1.12.1.json'
-$repairPath = Join-Path $portableRoot 'logs/session-store-repair-1.12.1.json'
-if (-not $sourcePath.StartsWith($portableRoot + '\versions\1.12.1\', [StringComparison]::OrdinalIgnoreCase) -or
+if ([bool]$DeleteAccountId -ne [bool]$ExpectedAccountName -or
+    ($DeleteAccountId -and $DeleteAccountId -cnotmatch '^[0-9a-f]{32}$')) { throw 'Deletion requires an exact account ID and expected name.' }
+$statusPath = Join-Path $portableRoot 'logs/update-1.12.2.json'
+$repairPath = Join-Path $portableRoot 'logs/session-store-repair-1.12.2.json'
+if (-not $sourcePath.StartsWith($portableRoot + '\versions\1.12.2\', [StringComparison]::OrdinalIgnoreCase) -or
     [IO.Path]::GetFileName($sourcePath) -ne 'CodexAccountManager.exe') { throw 'Invalid staged release path.' }
 function Assert-OrdinaryPath([string]$Path) {
     for ($candidate = [IO.Path]::GetFullPath($Path); $candidate; $candidate = [IO.Path]::GetDirectoryName($candidate)) {
@@ -33,7 +37,7 @@ function Write-JsonAtomic([string]$Path, $Value) {
     } finally { if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary } }
 }
 function Status([string]$State, [string]$Detail) {
-    Write-JsonAtomic $statusPath @{version='1.12.1';state=$State;detail=$Detail;at=[DateTimeOffset]::UtcNow.ToString('O');helperPid=$PID}
+    Write-JsonAtomic $statusPath @{version='1.12.2';state=$State;detail=$Detail;at=[DateTimeOffset]::UtcNow.ToString('O');helperPid=$PID}
 }
 function Invoke-Maintenance([string[]]$Arguments) {
     Assert-OrdinaryPath $sourcePath
@@ -74,6 +78,11 @@ try {
         if ((Get-FileHash -LiteralPath $repair.physicalPath -Algorithm SHA256).Hash -ne $hashes[$repair.threadId]) { throw 'Transcript changed during verification.' }
         if (-not $repair.archived -and $repair.threadId -notin $result.visibleSessionIds) { throw 'A repaired active thread is still missing from the API list.' }
     }
+    if ($DeleteAccountId) {
+        $deleted = Invoke-Maintenance -Arguments @('--delete-account',$DeleteAccountId,'--expected-account-name',$ExpectedAccountName)
+        if (-not $deleted.deleted -or $deleted.accountId -cne $DeleteAccountId) { throw 'Account deletion was not confirmed.' }
+        Write-JsonAtomic (Join-Path $portableRoot 'logs/account-delete-1.12.2.json') $deleted
+    }
     if (@(Get-Process -Name codex,ChatGPT,CodexAccountManager -ErrorAction SilentlyContinue).Count -gt 0) { throw 'Applications reopened. Data repair finished; executable promotion postponed.' }
     Assert-OrdinaryPath $targetPath
     $stagedTarget = Join-Path $portableRoot ('.update-' + [guid]::NewGuid().ToString('N') + '.exe')
@@ -90,7 +99,7 @@ try {
     }
     & $Codex mcp add codex_account_manager -- $targetPath --root $portableRoot --mcp | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Executable updated but MCP registration failed.' }
-    Status 'complete' ("Updated portable and MCP; repaired $($result.changed) paths; transcript hashes and API visibility verified.")
+    Status 'complete' ("Updated portable and MCP; repaired $($result.changed) paths; transcript hashes and API visibility verified; requested account deletion: $([bool]$DeleteAccountId).")
 } catch {
     Status 'failed' $_.Exception.Message
     throw

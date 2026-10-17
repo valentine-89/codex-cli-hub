@@ -13,10 +13,24 @@ internal static class Program
         var rootIndex = Array.IndexOf(args, "--root");
         var root = rootIndex >= 0 && rootIndex + 1 < args.Length ? args[rootIndex + 1] : DefaultRoot();
         var maintenance = args.Any(a => a is "--session-store-audit" or "--session-store-repair");
-        var background = maintenance || args.Any(a => a is "--mcp" or "--call" or "--automation-host" or "--session-host");
+        var deletion = args.Contains("--delete-account");
+        var background = maintenance || deletion || args.Any(a => a is "--mcp" or "--call" or "--automation-host" or "--session-host");
         try
         {
             var repository = new AccountRepository(root);
+            if (deletion)
+            {
+                if (maintenance || args.Any(a => a is "--mcp" or "--call" or "--automation-host" or "--session-host" or "--verify-api"))
+                    throw new IOException("Account deletion cannot be combined with another operation.");
+                var idIndex = Array.IndexOf(args, "--delete-account");
+                var nameIndex = Array.IndexOf(args, "--expected-account-name");
+                if (idIndex + 1 >= args.Length || nameIndex < 0 || nameIndex + 1 >= args.Length)
+                    throw new IOException("Provide --delete-account <ID> and --expected-account-name <name>.");
+                new AccountDeletion(repository).Delete(args[idIndex + 1], args[nameIndex + 1]);
+                using var deletionOutput = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true };
+                deletionOutput.WriteLine(JsonSerializer.Serialize(new { operation = "delete-account", accountId = args[idIndex + 1], deleted = true }));
+                return;
+            }
             if (maintenance)
             {
                 using var maintenanceOutput = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true };

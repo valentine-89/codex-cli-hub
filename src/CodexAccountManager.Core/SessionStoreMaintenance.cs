@@ -30,7 +30,7 @@ public sealed class SessionStoreMaintenance
         ValidatePaths();
         using var db = new NativeSqlite(database);
         db.Query("BEGIN");
-        try { ValidateSchema(db); return Read(db, profileId); }
+        try { return Read(db, profileId, ValidateSchema(db)); }
         finally { db.Query("ROLLBACK"); }
     }
 
@@ -58,9 +58,9 @@ public sealed class SessionStoreMaintenance
             var committed = false;
             try
             {
-                ValidateSchema(db);
-                var current = Read(db, profileId);
-                if (current.Issues.Count != 0 || !current.Repairs.SequenceEqual(expected.Repairs) || current.CheckedThreads != expected.CheckedThreads)
+                var current = Read(db, profileId, ValidateSchema(db));
+                if (current.SchemaVersion != expected.SchemaVersion || current.Issues.Count != 0
+                    || !current.Repairs.SequenceEqual(expected.Repairs) || current.CheckedThreads != expected.CheckedThreads)
                     throw new IOException("Session store changed since audit. Run the audit again.");
                 ensureIdle();
                 foreach (var repair in current.Repairs)
@@ -99,10 +99,14 @@ public sealed class SessionStoreMaintenance
         PathSafety.NoReparseAncestors(database);
     }
 
-    private static void ValidateSchema(NativeSqlite db)
+    private static int ValidateSchema(NativeSqlite db)
     {
         var migration = db.Query("SELECT MAX(version), SUM(CASE WHEN success=0 THEN 1 ELSE 0 END) FROM _sqlx_migrations").Single();
-        if (migration[0] != "59" || migration[1] != "0") throw new IOException("Unsupported Codex session schema. No changes allowed.");
+        if (migration[1] != "0") throw new IOException("Codex session migration is incomplete. No changes allowed.");
+        // 60 adds guardian review feedback; 61 adds thread read state. Neither
+        // changes the threads path columns or their update triggers.
+        if (!int.TryParse(migration[0], out var version) || version is < 59 or > 61)
+            throw new IOException($"Unsupported Codex session schema {migration[0] ?? "unknown"}. Supported migrations: 59-61. No changes allowed.");
         var columns = db.Query("PRAGMA table_info(threads)").ToDictionary(r => r[1]!, r => r);
         foreach (var (name, type) in new[] { ("id", "TEXT"), ("rollout_path", "TEXT"), ("archived", "INTEGER") })
             if (!columns.TryGetValue(name, out var column) || !string.Equals(column[2], type, StringComparison.OrdinalIgnoreCase)
@@ -121,9 +125,10 @@ public sealed class SessionStoreMaintenance
             if (operation is null || !sql.StartsWith($"CREATE TRIGGER {trigger[0]} {operation} WHEN ", StringComparison.OrdinalIgnoreCase))
                 throw new IOException("Unrecognized Codex thread trigger. No changes allowed.");
         }
+        return version;
     }
 
-    private SessionStoreAudit Read(NativeSqlite db, string? profileId)
+    private SessionStoreAudit Read(NativeSqlite db, string? profileId, int schemaVersion)
     {
         if (profileId is not null && !Guid.TryParseExact(profileId, "N", out _)) throw new IOException("Invalid profile ID.");
         var repairs = new List<SessionPathRepair>(); var issues = new List<SessionStoreIssue>(); var count = 0;
@@ -166,7 +171,7 @@ public sealed class SessionStoreMaintenance
                 issues.Add(new(id, previous, reason));
             }
         }
-        return new(59, count, repairs, issues);
+        return new(schemaVersion, count, repairs, issues);
     }
 
     private static Stream VerifyHeader(string path, string threadId, bool lockFile = false)

@@ -177,7 +177,13 @@ public sealed class CodexProfileService
             if ((attributes & FileAttributes.ReparsePoint) != 0) throw new IOException("Delete stopped: filesystem changed during deletion.");
             if ((attributes & FileAttributes.Directory) != 0)
             { DeleteContents(entry); Directory.Delete(entry, false); }
-            else File.Delete(entry);
+            else
+            {
+                // Codex plugin Git caches contain read-only pack files on Windows.
+                // Links have already been detached/checked; clear only this private file's flag.
+                if ((attributes & FileAttributes.ReadOnly) != 0) File.SetAttributes(entry, attributes & ~FileAttributes.ReadOnly);
+                File.Delete(entry);
+            }
         }
     }
 }

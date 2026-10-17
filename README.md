@@ -7,6 +7,9 @@ Từ **v1.11.0**, app có MCP điều khiển quota và phiên CLI qua stdio/nam
 Không cần computer-use hoặc mở khóa màn hình. Khi GUI đóng, bridge chạy nền; máy vẫn cần bật và không sleep.
 Cài bằng `pwsh -File ./scripts/install-mcp.ps1`.
 
+**v1.12.2:** hỗ trợ schema Codex đến migration 61, sửa lỗi từ chối xóa tài khoản sau khi Codex
+nâng cấp. Có lệnh xóa ngoại tuyến yêu cầu khớp ID và tên tài khoản; giữ lại hội thoại trong kho chung.
+
 **v1.12.1:** nhận diện hội thoại nén `.jsonl.zst` trong kiểm tra kho phiên, Resume, trạng thái
 và ngữ cảnh phiên. Đọc giải nén trực tiếp trong bộ nhớ, không tạo bản JSONL phụ trên ổ đĩa.
 Log khởi động có phiên bản Manager và mã lỗi để chẩn đoán trường hợp không mở được app.
@@ -258,10 +261,10 @@ Không dùng `Directory.Delete(path, true)` hoặc recursive delete qua junction
 **Trước khi xóa cả thư mục portable, Delete từng account trong app.** Chỉ sau khi tháo hết
 junction mới xóa thư mục app. Không giả định mọi công cụ recursive delete đều an toàn với junction.
 
-## Kiểm tra và sửa đường dẫn phiên (1.12.1)
+## Kiểm tra và sửa đường dẫn phiên (1.12.2)
 
-Phạm vi đã kiểm thử: CLI **0.162.1**, Desktop backend **0.162.0-alpha.17.2**, `state_5.sqlite`
-đến migration **59**. Dùng `winsqlite3.dll` có sẵn trên Windows; không cần Python hoặc SQLite CLI.
+Phạm vi hiện tại: CLI **0.163.0**, Desktop backend **0.163.0-alpha.10.2**, `state_5.sqlite`
+đến migration **61**. Dùng `winsqlite3.dll` có sẵn trên Windows; không cần Python hoặc SQLite CLI.
 Schema/database/trigger không nhận diện được sẽ chặn ghi, không tự chọn tương thích bản cũ.
 Codex có thể giữ đường dẫn `.jsonl` trong SQLite dù file trên đĩa đã thành `.jsonl.zst`.
 Manager kiểm tra cả hai dạng, ưu tiên JSONL đang hoạt động; định dạng nén không bị coi là mất file.
@@ -283,13 +286,25 @@ nhập lịch sử cũ để chữa lỗi đường dẫn này. Lệnh sửa ki�
 `--verify-api` kiểm tra lại danh sách qua RPC sau sửa và chỉ dùng cùng lệnh sửa.
 Log chỉ giữ phương thức, mã lỗi và phiên bản Codex, không giữ raw RPC error hay nội dung hội thoại.
 
-Khi executable đang dùng, publish vào `versions/1.12.1`, đăng ký MCP trỏ bản đó với `--root`
+Lệnh xóa ngoại tuyến dùng cùng kiểm tra an toàn với nút Delete, yêu cầu đóng Codex và Manager:
+
+```powershell
+./CodexAccountManager.exe --root <portable> --delete-account <account-id> --expected-account-name '<exact-name>'
+```
+
+ID phải là ID tài khoản Manager, tên phải khớp chính xác. Lệnh khóa kho tài khoản, chuẩn hóa các
+tham chiếu của profile trước khi tháo junction, rồi xóa thông tin riêng của tài khoản đó.
+Không sửa/xóa hội thoại chung hoặc thêm tool xóa tài khoản vào MCP.
+
+Khi executable đang dùng, publish vào `versions/1.12.2`, đăng ký MCP trỏ bản đó với `--root`
 thư mục portable. Kết nối đã mở vẫn dùng tiến trình cũ đến khi đóng/mở lại. Có thể chạy
 `scripts/finish-update.ps1` bằng PowerShell 7 với các tham số `-Root`, `-Source` (EXE đã stage
-trong `versions/1.12.1`) và `-Sha256` để chờ tối đa 24 giờ. Helper không dừng process; khi Desktop,
+trong `versions/1.12.2`) và `-Sha256` để chờ mặc định 24 giờ (`-WaitHours` tối đa 168 giờ). Helper không dừng process; khi Desktop,
 CLI và Manager đều đã đóng, nó sửa/kiểm tra đường dẫn, đối chiếu hash JSONL và API, cập nhật EXE
-gốc rồi đăng ký MCP cùng bản. Trạng thái ở `logs/update-1.12.1.json`, kết quả sửa ở
-`logs/session-store-repair-1.12.1.json`. Nếu hết thời gian hoặc lỗi, xem trạng thái rồi chạy lại.
+gốc rồi đăng ký MCP cùng bản. Có thể thêm `-DeleteAccountId` và `-ExpectedAccountName` khi đã
+chỉ định tài khoản cần xóa; helper chỉ xóa sau khi sửa/kiểm tra đường dẫn thành công.
+Trạng thái ở `logs/update-1.12.2.json`, kết quả sửa ở `logs/session-store-repair-1.12.2.json`,
+kết quả xóa ở `logs/account-delete-1.12.2.json`. Nếu hết thời gian hoặc lỗi, xem trạng thái rồi chạy lại.
 
 ## Recovery thủ công
 

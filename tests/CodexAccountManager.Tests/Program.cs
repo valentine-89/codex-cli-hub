@@ -25,8 +25,7 @@ if (args.Length is 2 or 3 && args[0] == "--session-store-fixture-repair")
     var changed = service.Repair(service.Audit());
     if (args.Length == 3)
     {
-        var account = new Account { Id = args[2], ProfilePath = Path.Combine("profiles", args[2]), DisplayName = "fixture" };
-        new CodexProfileService(app, new JunctionService(), () => { }).Delete(account, new() { DefaultCodexHome = home });
+        new AccountDeletion(new AccountRepository(app), () => { }).Delete(args[2], "fixture");
     }
     Console.WriteLine(JsonSerializer.Serialize(new { changed, after = service.Audit() }));
     return 0;
@@ -1115,11 +1114,13 @@ tests.Add(("managed CLI resume, send, approval, steer, interrupt and stop use pe
     using var saved = System.Text.Json.JsonDocument.Parse(File.ReadAllText(runtime.PathFor(record.Id, ".state.json")));
     Assert(saved.RootElement.GetProperty("status").GetString() == "stopped", "Final session state not persisted");
 }));
+var sessionTestStart = tests.Count;
 SessionStoreTests.Register(tests, root);
+var selectedTests = args.Contains("--session-store-tests") ? tests.Skip(sessionTestStart).ToArray() : tests.ToArray();
 var failures = 0;
 try
 {
-    foreach (var test in tests)
+    foreach (var test in selectedTests)
     {
         try { await test.Run(); Console.WriteLine("PASS " + test.Name); }
         catch (Exception ex) { failures++; Console.WriteLine("FAIL " + test.Name + ": " + ex.Message); }
@@ -1142,7 +1143,7 @@ finally
     }
     Cleanup(root);
 }
-Console.WriteLine($"{tests.Count - failures}/{tests.Count} passed");
+Console.WriteLine($"{selectedTests.Length - failures}/{selectedTests.Length} passed");
 return failures == 0 ? 0 : 1;
 
 sealed class Fixture

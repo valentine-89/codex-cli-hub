@@ -1,4 +1,31 @@
-# Validation — v1.12.1, 2026-10-14
+# Validation — v1.12.2, 2026-10-17
+
+- **84/84 .NET regression tests and 4/4 Python maintenance tests passed.** After adding handling for
+  private read-only plugin cache files, all **19/19 session-store tests** passed again. Release build
+  and single-file publish completed with zero warnings/errors. Packaged MCP reports 1.12.2 with the
+  unchanged 16 tools, excludes private account fields and exits on EOF. Packaged GUI startup/render/exit passed.
+- Installed **CLI 0.163.0** and **Desktop backend 0.163.0-alpha.10.2** passed all four schema-only
+  integration combinations (each binary, plain/compressed rollouts). Verified cross-profile resume,
+  production repair/deletion idle guards, exact deletion-name validation, legacy missing-list/archive
+  reproduction, path repair, account metadata removal, shared transcript hashes, archive/unarchive
+  and idempotence. No real model turn or account authentication was used.
+- Live read-only inspection confirmed state migration **61**, successful migrations and SQLite
+  `quick_check=ok`. Migration 60 adds `guardian_review_feedback`; 61 adds `thread_read_receipts`.
+  Required thread path columns and existing triggers are unchanged. The former strict migration-59
+  check caused the reported deletion error. Current audit reports the actual version and still rejects
+  unknown schemas, failed migrations, incompatible columns/triggers and migration changes since audit.
+- Current live audit: **163 threads, 12 profile-path aliases, zero validation issues**. The requested
+  account has two aliases (one plain, one compressed), with matching shared transcript IDs. Actual
+  account deletion and path writes remain deferred until Codex/Desktop/Manager clients close.
+- The first current-CLI fixture exposed read-only Git pack files created by plugin initialization.
+  Profile deletion now clears only the private file's read-only flag after shared junctions are
+  detached. A regression verifies private cache deletion while shared bytes/attributes and other
+  accounts/credentials remain intact. Integration fixtures disable plugin discovery to avoid unrelated
+  network downloads; cleanup removes explicitly inventoried files and then empty directories.
+- The optional deferred deletion requires both exact account ID and expected name, uses the normal
+  filesystem/process/schema checks and an exclusive Manager lock, and has no MCP deletion tool.
+
+## Previous validation — v1.12.1, 2026-10-14
 
 - **80/80 .NET tests and 4/4 Python maintenance tests passed.** Release single-file publish completed
   without warnings/errors. Packaged MCP handshake reports 1.12.1 with the same 16 tools, excludes
@@ -226,7 +253,7 @@ Release ZIP contains only the executable; local profiles and account metadata ar
 
 ## Current executable SHA-256
 ```text
-EF56CE089C71BED33E96E67391BB204FA16BF0C96CD2AEC3F7722D0B4E2BBA7B
+FA48B33029FE4471655B0314A1245D8F3F288560AFDEC110E0F528B1340F8173
 ```
 
 Protocol source: https://learn.chatgpt.com/docs/app-server

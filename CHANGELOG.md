@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.12.2 — 2026-10-17
+
+- Support verified Codex state migrations 60 and 61, which add guardian feedback and thread read receipts without changing rollout path columns. Report the actual migration and reject future schemas, incomplete migrations and schema changes during repair.
+- Fix account deletion blocked by the former migration-59-only check. Add an explicit offline deletion command with exact account ID/name matching, the existing process and filesystem guards, and shared-history preservation.
+- Delete private read-only Git/plugin cache files safely after detaching shared links; preserve attributes and contents of shared transcripts.
+- Allow the deferred update helper to perform one explicitly requested account deletion after clients close. MCP tools and parameters are unchanged.
+
 ## 1.12.1 — 2026-10-14
 
 - Recognize idle rollouts compressed as `.jsonl.zst` while SQLite retains logical `.jsonl` paths. Stream-decode audit metadata, session status and saved context without creating disk copies; resume preflights now find compressed chats.
