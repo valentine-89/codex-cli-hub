@@ -34,7 +34,7 @@ public sealed class CodexThreadReader(Logger? logger = null)
         var version = "unknown";
         try
         {
-            await Send(new { id = 1, method = "initialize", @params = new { clientInfo = new { name = "codex_account_manager", version = "1.12.2" } } });
+            await Send(new { id = 1, method = "initialize", @params = new { clientInfo = new { name = "codex_account_manager", version = "1.12.3" } } });
             var initialized = await Receive(1);
             var match = System.Text.RegularExpressions.Regex.Match(Text(initialized, "userAgent") ?? "", @"^[^/\s]+/([0-9][0-9A-Za-z.+-]{0,63})(?:\s|$)");
             if (match.Success) version = match.Groups[1].Value;
@@ -61,7 +61,7 @@ public sealed class CodexThreadReader(Logger? logger = null)
                 cursor = Text(result, "nextCursor");
                 if (cursor is not null && !cursors.Add(cursor)) throw new IOException("Codex repeated a session page.");
             } while (cursor is not null);
-            return sessions.Values.ToArray();
+            return WorkspacePaths.RestorePosixDirectories(sharedHome, sessions.Values.ToArray(), cancellationToken);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {

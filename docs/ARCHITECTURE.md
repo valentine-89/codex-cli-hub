@@ -65,6 +65,11 @@ the shared sessions directory.
 - Open: a transient `CodexThreadReader` app-server connection lists all pages of interactive,
   non-archived threads from shared SQLite (`useStateDbOnly`, no provider filter). Merge saved Desktop
   workspace roots and normalize Windows device paths, UNC/WSL aliases and verified historical mount paths.
+  `WorkspacePaths` checks original POSIX cwd values in shared SQLite read-only for the listed IDs: Windows
+  app-server can project `/home/...` onto its current drive. Only an exact matching projection is restored;
+  RPC still owns membership/titles/order. Linux paths resolve against known WSL roots, scoped by explicit
+  project assignments, using the longest unambiguous case-sensitive Linux prefix. Unresolved paths remain
+  visible and unavailable rather than being interpreted as local Windows directories. No database writes.
   `WorkspaceCatalogService` separates explicitly projectless Desktop chats and manager chat workspaces;
   a missing folder or null project ID alone never makes a project chat projectless. Desktop state is read only.
   The picker has project/session and projectless tabs, search, refresh, new-chat and exact-ID resume actions.

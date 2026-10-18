@@ -73,10 +73,11 @@ if (args.Contains("app-server"))
             if (mode == "error") { Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { id = id.GetInt32(), error = new { code = -32601 } })); continue; }
             if (mode == "cancel") { await Task.Delay(10000); continue; }
             var second = parameters.GetProperty("cursor").ValueKind == System.Text.Json.JsonValueKind.String;
+            var projectDirectory = mode == "posix" ? @"D:\home\user\project" : profileHome;
             var data = second ? new object[] {
-                new { id = "00000000-0000-0000-0000-000000000001", cwd = profileHome, name = "Project chat", updatedAt = 100 },
+                new { id = "00000000-0000-0000-0000-000000000001", cwd = projectDirectory, name = "Project chat", updatedAt = 100 },
                 new { id = "00000000-0000-0000-0000-000000000002", cwd = (string?)null, name = "Chat without folder", updatedAt = 200 }
-            } : new object[] { new { id = "00000000-0000-0000-0000-000000000001", cwd = profileHome, name = "Project chat", updatedAt = 100 } };
+            } : new object[] { new { id = "00000000-0000-0000-0000-000000000001", cwd = projectDirectory, name = "Project chat", updatedAt = 100 } };
             Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { id = id.GetInt32(), result = new { data, nextCursor = second && mode != "repeat" ? null : "page-2" } }));
         }
         else if (method is "thread/start" or "thread/resume")
@@ -489,6 +490,90 @@ Test("workspace catalog separates explicit projectless chats and keeps missing p
     Assert(result.Projects.Any(p => p.Directory == missing && !p.Exists), "Missing project became a folderless chat");
     Assert(File.ReadAllText(state) == before, "Desktop state changed during discovery");
 });
+Test("Linux cwd recovery is read-only and only corrects matching RPC projections", () =>
+{
+    var f = Fixture(); var database = Path.Combine(f.Settings.DefaultCodexHome, "state_5.sqlite");
+    var paths = new[] { "/home/user/project", "/mnt/d/project", @"D:\home\user\windows", "/home/user/previous", "/home/user/Project" };
+    using (var db = new NativeSqlite(database, write: true, create: true))
+    {
+        for (var i = 0; i < paths.Length; i++) db.Query("INSERT INTO threads(id,rollout_path,cwd,title) VALUES(?,'fixture',?,?)", i.ToString(), paths[i], "database title");
+        db.Query("INSERT INTO threads(id,rollout_path,cwd,title) VALUES('not-listed','fixture','/home/user/hidden','hidden')");
+    }
+    var before = File.ReadAllBytes(database);
+    var listed = new[] { @"D:\home\user\project", @"\\?\C:\mnt\d\project", paths[2], @"D:\home\user\current", @"D:\home\user\project" }
+        .Select((cwd, i) => new CatalogSession(i.ToString(), "RPC title", cwd, DateTime.UnixEpoch)).ToArray();
+    var result = WorkspacePaths.RestorePosixDirectories(f.Settings.DefaultCodexHome, listed);
+    Assert(result.Count == listed.Length && result.All(s => s.Title == "RPC title"), "Database overrode RPC membership or titles");
+    Assert(result[0].WorkingDirectory == paths[0] && result[1].WorkingDirectory == paths[1], "Linux source cwd not recovered");
+    Assert(result.Skip(2).SequenceEqual(listed.Skip(2)), "Windows cwd, concurrent change or Linux case mismatch overwritten");
+    Assert(File.ReadAllBytes(database).SequenceEqual(before), "Cwd recovery wrote the database");
+});
+Test("WSL resolution uses known roots, exact Linux case and longest unambiguous match", () =>
+{
+    const string root = @"\\wsl.localhost\Fixture-A\home\user\project";
+    const string other = @"\\wsl.localhost\Fixture-B\home\user\project";
+    Assert(WorkspacePaths.Resolve("/home/user/project/sub folder", [root]) == root + @"\sub folder", "Nested WSL cwd lost");
+    Assert(WorkspacePaths.Resolve("/home/user/project", [root, other]) == "/home/user/project", "Guessed distro for ambiguous cwd");
+    Assert(WorkspacePaths.Resolve("/home/user/project/sub", [root, other + @"\sub"]) == other + @"\sub", "More specific known root ignored");
+    foreach (var cwd in new[] { "/home/user/Project", "/home/user/project-other", "/unmapped/project" })
+        Assert(WorkspacePaths.Resolve(cwd, [root]) == cwd && !WorkspacePaths.Exists(cwd), "Unresolved Linux cwd treated as Windows or wrong project");
+    foreach (var cwd in new[] { "/home/user/../project", "/home/user\\project", "/home/user/project:stream" })
+        Assert(WorkspacePaths.Resolve(cwd, [root]) is null, "Invalid Linux path accepted");
+    Assert(WorkspacePaths.Resolve(@"D:\home\user\project", [root]) == @"D:\home\user\project", "Real Windows path remapped without evidence");
+});
+Test("workspace groups Linux sessions with WSL projects and keeps unresolved cwd visible", () =>
+{
+    var f = Fixture(); const string root = @"\\wsl.localhost\Fixture-A\home\user\project";
+    var state = Path.Combine(f.Settings.DefaultCodexHome, ".codex-global-state.json");
+    File.WriteAllText(state, JsonSerializer.Serialize(new Dictionary<string, object> {
+        ["electron-saved-workspace-roots"] = new[] { @"\\wsl$\Fixture-A\home\user\project" }
+    }));
+    var before = File.ReadAllText(state);
+    var result = WorkspaceCatalogService.Build(f.Settings.DefaultCodexHome, [
+        new("linux", "Linux", "/home/user/project", DateTime.UnixEpoch),
+        new("unc", "Windows WSL", root, DateTime.UnixEpoch),
+        new("unknown", "Unknown distro", "/unmapped/project", DateTime.UnixEpoch)
+    ]);
+    Assert(result.Projects.Count == 2 && result.Projects.Single(p => p.Directory == root).SessionCount == 2, "Linux chat split from its WSL project");
+    Assert(result.Sessions.Take(2).All(s => s.WorkingDirectory == root && !s.IsProjectless), "Resolved cwd not carried to selection/resume");
+    Assert(result.Projects.Any(p => p.Directory == "/unmapped/project" && !p.Exists), "Unresolved project vanished or became local");
+    Assert(File.ReadAllText(state) == before, "Discovery modified Desktop state");
+    var script = CodexProcessLauncher.BuildScript(Path.Combine(f.App, "codex.exe"), f.App, root,
+        CodexAction.Resume, f.Settings.DefaultCodexHome, Guid.NewGuid().ToString());
+    Assert(script.Contains("--cd " + ShellRunner.Quote(root)) && script.Contains("Set-Location -LiteralPath " + ShellRunner.Quote(root)), "Resume lost resolved WSL cwd");
+});
+Test("project assignments disambiguate WSL distros without remapping unresolved sessions twice", () =>
+{
+    var f = Fixture(); const string root = @"\\wsl.localhost\Fixture-A\home\user\project";
+    const string other = @"\\wsl.localhost\Fixture-B\home\user\project";
+    File.WriteAllText(Path.Combine(f.Settings.DefaultCodexHome, ".codex-global-state.json"), JsonSerializer.Serialize(new Dictionary<string, object> {
+        ["local-projects"] = new { a = new { rootPaths = new[] { root } }, b = new { rootPaths = new[] { other } } },
+        ["thread-project-assignments"] = new { assigned = new { projectId = "b" } }
+    }));
+    var result = WorkspaceCatalogService.Build(f.Settings.DefaultCodexHome, [
+        new("assigned", "Assigned", "/home/user/project", DateTime.UnixEpoch),
+        new("server", "API assignment", "/home/user/project", DateTime.UnixEpoch, "a"),
+        new("ambiguous", "No assignment", "/home/user/project", DateTime.UnixEpoch)
+    ]);
+    Assert(result.Sessions[0].WorkingDirectory == other && result.Sessions[1].WorkingDirectory == root, "Project distro ignored");
+    Assert(result.Sessions[2].WorkingDirectory == "/home/user/project" && result.Projects.Single(p => p.Directory == "/home/user/project").SessionCount == 1,
+        "Ambiguous session mapped to an arbitrary distro");
+});
+tests.Add(("paginated Windows RPC recovers Linux cwd and groups it into the saved WSL project", async () =>
+{
+    var f = Fixture(); const string root = @"\\wsl.localhost\Fixture-A\home\user\project";
+    File.WriteAllText(Path.Combine(f.App, "catalog-mode.txt"), "posix");
+    using (var db = new NativeSqlite(Path.Combine(f.Settings.DefaultCodexHome, "state_5.sqlite"), write: true, create: true))
+    {
+        db.Query("INSERT INTO threads(id,rollout_path,cwd) VALUES('00000000-0000-0000-0000-000000000001','fixture','/home/user/project')");
+    }
+    File.WriteAllText(Path.Combine(f.Settings.DefaultCodexHome, ".codex-global-state.json"), JsonSerializer.Serialize(new Dictionary<string, object> {
+        ["electron-saved-workspace-roots"] = new[] { root }
+    }));
+    var result = await new WorkspaceCatalogService().ReadAsync(new(null, null, false, Environment.ProcessPath!), f.App, f.Settings.DefaultCodexHome);
+    Assert(result.Sessions.Count == 2 && result.Projects.Single().Directory == root && result.Projects.Single().SessionCount == 1,
+        "Windows RPC created a bogus D:\\home project");
+}));
 Test("workspace metadata failures preserve current sessions and legacy headers allow late cwd", () =>
 {
     var f = Fixture();

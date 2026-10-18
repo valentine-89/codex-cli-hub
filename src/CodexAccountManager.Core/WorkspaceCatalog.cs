@@ -48,6 +48,8 @@ public sealed class WorkspaceCatalogService(Logger? logger = null)
         var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var projectless = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var assigned = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var projectRoots = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+        var threadProjects = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var projectlessDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var state = Path.Combine(sharedHome, ".codex-global-state.json");
         if (File.Exists(state))
@@ -61,12 +63,20 @@ public sealed class WorkspaceCatalogService(Logger? logger = null)
                 AddPaths(json, "electron-saved-workspace-roots");
                 AddPaths(json, "active-workspace-roots");
                 if (json.TryGetProperty("local-projects", out var local) && local.ValueKind == JsonValueKind.Object)
-                    foreach (var entry in local.EnumerateObject()) AddPaths(entry.Value, "rootPaths");
+                    foreach (var entry in local.EnumerateObject())
+                    {
+                        AddPaths(entry.Value, "rootPaths");
+                        if (entry.Value.ValueKind == JsonValueKind.Object
+                            && entry.Value.TryGetProperty("rootPaths", out var paths) && paths.ValueKind == JsonValueKind.Array)
+                            projectRoots[entry.Name] = paths.EnumerateArray().Where(p => p.ValueKind == JsonValueKind.String)
+                                .Select(p => TryNormalize(p.GetString())).OfType<string>().ToArray();
+                    }
                 if (json.TryGetProperty("projectless-thread-ids", out var ids) && ids.ValueKind == JsonValueKind.Array)
                     foreach (var id in ids.EnumerateArray()) if (id.ValueKind == JsonValueKind.String) projectless.Add(id.GetString()!);
                 if (json.TryGetProperty("thread-project-assignments", out var assignments) && assignments.ValueKind == JsonValueKind.Object)
                     foreach (var entry in assignments.EnumerateObject())
-                        if (CodexThreadReader.Text(entry.Value, "projectId") is not null) assigned.Add(entry.Name);
+                        if (CodexThreadReader.Text(entry.Value, "projectId") is { } projectId)
+                        { assigned.Add(entry.Name); threadProjects[entry.Name] = projectId; }
                 if (json.TryGetProperty("thread-projectless-output-directories", out var outputs) && outputs.ValueKind == JsonValueKind.Object)
                     foreach (var entry in outputs.EnumerateObject())
                     {
@@ -82,11 +92,14 @@ public sealed class WorkspaceCatalogService(Logger? logger = null)
         var normalized = new List<CatalogSession>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var chatRoot = ChatRoot(sharedHome);
+        var knownRoots = roots.Concat(sessions.Select(s => TryNormalize(s.WorkingDirectory)).OfType<string>()).ToArray();
         foreach (var session in sessions.OrderByDescending(s => s.UpdatedUtc))
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (!seen.Add(session.Id)) continue;
-            var path = TryNormalize(session.WorkingDirectory);
+            var projectId = session.ProjectId ?? threadProjects.GetValueOrDefault(session.Id);
+            var path = WorkspacePaths.Resolve(session.WorkingDirectory,
+                projectId is not null && projectRoots.TryGetValue(projectId, out var scopedRoots) ? scopedRoots : knownRoots);
             // A null projectId alone does not mean projectless: CLI projects also have no projectId.
             var noProject = session.ProjectId is null && !assigned.Contains(session.Id)
                 && (session.IsProjectless || projectless.Contains(session.Id) || string.IsNullOrWhiteSpace(session.WorkingDirectory)
@@ -98,10 +111,11 @@ public sealed class WorkspaceCatalogService(Logger? logger = null)
         foreach (var root in roots) folders[root] = new(root, DateTime.UnixEpoch, 0, Directory.Exists(root));
         foreach (var session in normalized.Where(s => !s.IsProjectless))
         {
-            if (TryNormalize(session.WorkingDirectory) is not { } path) continue;
+            var path = session.WorkingDirectory;
+            if (path is null || TryNormalize(path) is null && !WorkspacePaths.IsPosix(path)) continue;
             folders.TryGetValue(path, out var old);
             folders[path] = new(path, old is not null && old.LastUsedUtc > session.UpdatedUtc ? old.LastUsedUtc : session.UpdatedUtc,
-                (old?.SessionCount ?? 0) + 1, Directory.Exists(path));
+                (old?.SessionCount ?? 0) + 1, WorkspacePaths.Exists(path));
         }
         return new(folders.Values.OrderByDescending(p => p.Exists).ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(p => p.Directory, StringComparer.OrdinalIgnoreCase).ToArray(), normalized, warning);

@@ -1,4 +1,23 @@
-# Validation — v1.12.2, 2026-10-17
+# Validation — v1.12.3, 2026-10-18
+
+- **89/89 .NET regression tests and 4/4 Python maintenance tests passed.** Release build and
+  single-file publish completed without warnings/errors. Packaged MCP reports 1.12.3 with the same
+  16 tools, excludes private account fields and exits on EOF. Isolated GUI startup/render/exit passed.
+- Reproduced the reported failure on the installed Windows CLI: SQLite retained `/home/...` cwd
+  while `thread/list` surfaced `D:\home\...`. The old catalog showed 40 projects, including three
+  nonexistent local-drive duplicates. The corrected catalog shows 37 projects and the same 98 sessions
+  (five projectless), with all eight affected sessions grouped under their existing WSL directories.
+- Read-only live validation confirmed those three WSL directories exist. Original SQLite cwd values
+  and SHA-256 hashes of all eight affected transcripts remained unchanged across final validation.
+  No real model turn, thread resume, account mutation or live database repair was performed.
+- New regressions cover exact ID/projection recovery without database writes, genuine Windows cwd
+  preservation, concurrent cwd mismatch, Linux path case, ambiguous distros, nested roots, explicit
+  project assignments, unresolved paths, pagination, grouping and the UNC path passed to resume.
+  The SQLite fixture now includes the real `cwd` column used by read-only discovery.
+- Native checks cover the packaged main window and catalog/directory discovery. An interactive
+  resume into WSL remains a separate user action; no existing terminal was stopped to test this fix.
+
+## Previous validation — v1.12.2, 2026-10-17
 
 - **84/84 .NET regression tests and 4/4 Python maintenance tests passed.** After adding handling for
   private read-only plugin cache files, all **19/19 session-store tests** passed again. Release build

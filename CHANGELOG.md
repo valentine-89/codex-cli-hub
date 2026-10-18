@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.12.3 — 2026-10-18
+
+- Fix WSL projects shown as missing `D:\home\...` folders when Windows app-server serializes a Linux cwd as a local drive path. Recover matching original cwd values by thread ID using read-only SQLite; retain RPC membership, titles and ordering.
+- Resolve Linux cwd against saved WSL roots and explicit UNC session paths, honoring project assignments and the most specific unambiguous root. Keep unresolved Linux paths visible without guessing a distro or rewriting history.
+- Cover RPC projection recovery, Windows path preservation, ambiguous distros, case-sensitive Linux matching, nested roots, project grouping and resume arguments.
+
 ## 1.12.2 — 2026-10-17
 
 - Support verified Codex state migrations 60 and 61, which add guardian feedback and thread read receipts without changing rollout path columns. Report the actual migration and reject future schemas, incomplete migrations and schema changes during repair.

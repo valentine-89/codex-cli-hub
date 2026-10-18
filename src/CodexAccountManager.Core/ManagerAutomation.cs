@@ -28,7 +28,7 @@ public sealed class ManagerAutomation
         await operations.WaitAsync();
         try
         {
-            if (tool == "manager_health") return new { version = "1.12.2", processId = Environment.ProcessId,
+            if (tool == "manager_health") return new { version = "1.12.3", processId = Environment.ProcessId,
                 transport = "stdio + current-user named pipe", supportsLockedDesktop = true, root = repository.Root, hostMode };
             if (tool == "accounts_list") return new { accounts = accounts().Accounts.Select((a, i) => AccountView(a, i)).ToArray() };
             if (tool == "account_refresh")

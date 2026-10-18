@@ -11,7 +11,7 @@ internal static class SessionStoreTests
         using var db = new NativeSqlite(Path.Combine(home, "state_5.sqlite"), write: true, create: true);
         db.Query("CREATE TABLE _sqlx_migrations(version INTEGER PRIMARY KEY,success INTEGER NOT NULL)");
         db.Query("INSERT INTO _sqlx_migrations VALUES(59,1)");
-        db.Query("CREATE TABLE threads(id TEXT PRIMARY KEY,rollout_path TEXT NOT NULL,archived INTEGER NOT NULL DEFAULT 0,title TEXT DEFAULT 'keep title',project_id TEXT DEFAULT 'keep project',updated_at INTEGER DEFAULT 42)");
+        db.Query("CREATE TABLE threads(id TEXT PRIMARY KEY,rollout_path TEXT NOT NULL,cwd TEXT NOT NULL DEFAULT '',archived INTEGER NOT NULL DEFAULT 0,title TEXT DEFAULT 'keep title',project_id TEXT DEFAULT 'keep project',updated_at INTEGER DEFAULT 42)");
     }
 
     internal static void Register(List<(string Name, Func<Task> Run)> tests, string testRoot)

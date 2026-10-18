@@ -7,6 +7,9 @@ Từ **v1.11.0**, app có MCP điều khiển quota và phiên CLI qua stdio/nam
 Không cần computer-use hoặc mở khóa màn hình. Khi GUI đóng, bridge chạy nền; máy vẫn cần bật và không sleep.
 Cài bằng `pwsh -File ./scripts/install-mcp.ps1`.
 
+**v1.12.3:** sửa project WSL bị hiển thị thành `D:\home\...` và báo thư mục không tồn tại.
+Đối chiếu cwd gốc theo ID phiên và ghép vào project WSL đã lưu; không sửa database hay lịch sử chat.
+
 **v1.12.2:** hỗ trợ schema Codex đến migration 61, sửa lỗi từ chối xóa tài khoản sau khi Codex
 nâng cấp. Có lệnh xóa ngoại tuyến yêu cầu khớp ID và tên tài khoản; giữ lại hội thoại trong kho chung.
 
@@ -126,6 +129,10 @@ Danh sách hiện tại lấy qua app-server `thread/list`, đọc hết các tr
 CLI/Desktop tương tác chưa archive và không lọc provider. Bổ sung các thư mục đã lưu trong Desktop;
 dùng dấu projectless của Desktop để phân loại, không suy đoán từ việc thiếu Git hoặc thư mục bị mất.
 Hỗ trợ tiền tố Windows `\\?\`, UNC/WSL, `/mnt/<drive>` và đường dẫn cũ `C:\mnt\<drive>` khi đích thật tồn tại.
+Với cwd Linux bị app-server Windows đổi thành `<drive>:\home\...`, Manager đọc cwd gốc trong SQLite
+theo đúng ID phiên, rồi ghép với root WSL đã lưu hoặc root UNC của phiên khác. Ưu tiên project đã gán
+và root khớp cụ thể nhất; không đoán distro khi có nhiều đích trùng nhau. Đường dẫn Linux chưa xác định
+được vẫn hiển thị để chọn lại bằng Browse. Danh sách/tên phiên vẫn lấy từ API, SQLite chỉ đọc cwd.
 **Refresh** tải lại danh sách; ô tìm kiếm lọc đường dẫn và tên chat. Resume truyền ID và `--cd` rõ ràng.
 Nếu API lỗi, giữ danh sách thành công gần nhất trong tiến trình và báo **Not updated**. Khi chưa có
 danh sách thành công, báo lỗi để thử lại. Không tự thay bằng danh sách rỗng hoặc fallback JSONL.
