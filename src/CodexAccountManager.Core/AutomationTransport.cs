@@ -11,6 +11,7 @@ public sealed class AutomationPipe : IDisposable
 {
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private readonly CancellationTokenSource lifetime = new();
+    private readonly SemaphoreSlim connections = new(10, 10);
     private readonly string name;
     private readonly Func<string, JsonElement, Task<object>> handle;
     private Task? listener;
@@ -27,45 +28,58 @@ public sealed class AutomationPipe : IDisposable
     {
         while (!lifetime.IsCancellationRequested)
         {
-            var pipe = new NamedPipeServerStream(name, PipeDirection.InOut, 10, PipeTransmissionMode.Byte,
-                PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-            try { await pipe.WaitForConnectionAsync(lifetime.Token); }
-            catch (OperationCanceledException) { pipe.Dispose(); break; }
+            try { await connections.WaitAsync(lifetime.Token); }
+            catch (OperationCanceledException) { break; }
+            NamedPipeServerStream? pipe = null;
+            try
+            {
+                pipe = new NamedPipeServerStream(name, PipeDirection.InOut, 10, PipeTransmissionMode.Byte,
+                    PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+                await pipe.WaitForConnectionAsync(lifetime.Token);
+            }
+            catch (OperationCanceledException) { pipe?.Dispose(); connections.Release(); break; }
+            catch { pipe?.Dispose(); connections.Release(); throw; }
             _ = Serve(pipe);
         }
     }
     private async Task Serve(NamedPipeServerStream pipe)
     {
-        using (pipe)
-        using (var reader = new StreamReader(pipe, new UTF8Encoding(false), false, 4096, true))
-        using (var writer = new StreamWriter(pipe, new UTF8Encoding(false), 4096, true) { AutoFlush = true })
+        try
         {
-            try
+            using (pipe)
+            using (var reader = new StreamReader(pipe, new UTF8Encoding(false), false, 4096, true))
+            using (var writer = new StreamWriter(pipe, new UTF8Encoding(false), 4096, true) { AutoFlush = true })
             {
-                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
-                deadline.CancelAfter(TimeSpan.FromSeconds(90));
-                var line = await ReadLine(reader, deadline.Token);
-                if (line is null) return;
-                using var request = JsonDocument.Parse(line);
-                var method = request.RootElement.GetProperty("method").GetString()!;
-                var args = request.RootElement.TryGetProperty("arguments", out var value) ? value.Clone() : JsonSerializer.SerializeToElement(new { });
-                object response;
-                try { response = new { result = await handle(method, args) }; }
-                catch (Exception ex)
-                { response = new { error = ex is IOException or ArgumentException or InvalidOperationException or TimeoutException
-                    or System.ComponentModel.Win32Exception or JsonException or OperationCanceledException or KeyNotFoundException
-                    ? AutomationErrors.Safe(ex) : "Unexpected operation error (" + ex.GetType().Name + "). Re-read session state before retrying." }; }
-                await writer.WriteLineAsync(JsonSerializer.Serialize(response, Json));
+                try
+                {
+                    using var deadline = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+                    deadline.CancelAfter(TimeSpan.FromSeconds(90));
+                    var line = await ReadLine(reader, deadline.Token);
+                    if (line is null) return;
+                    using var request = JsonDocument.Parse(line);
+                    var method = request.RootElement.GetProperty("method").GetString()!;
+                    var args = request.RootElement.TryGetProperty("arguments", out var value) ? value.Clone() : JsonSerializer.SerializeToElement(new { });
+                    object response;
+                    try { response = new { result = await handle(method, args) }; }
+                    catch (Exception ex)
+                    { response = new { error = ex is IOException or ArgumentException or InvalidOperationException or TimeoutException
+                        or System.ComponentModel.Win32Exception or JsonException or OperationCanceledException or KeyNotFoundException
+                        ? AutomationErrors.Safe(ex) : "Unexpected operation error (" + ex.GetType().Name + "). Re-read session state before retrying." }; }
+                    await writer.WriteLineAsync(JsonSerializer.Serialize(response, Json));
+                }
+                catch (Exception ex) when (ex is IOException or OperationCanceledException or JsonException) { }
             }
-            catch (Exception ex) when (ex is IOException or OperationCanceledException or JsonException) { }
         }
+        finally { connections.Release(); }
     }
-    public static async Task<JsonElement> Call(string name, string method, object arguments, int timeoutSeconds = 60)
+    public static async Task<JsonElement> Call(string name, string method, object arguments, int timeoutSeconds = 60,
+        int connectTimeoutMilliseconds = 3000)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
         using var pipe = new NamedPipeClientStream(".", name, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-        try { await pipe.ConnectAsync(3000, timeout.Token); }
-        catch (TimeoutException) { throw new IOException("Manager/session host unavailable. Start Account Manager and retry."); }
+        try { await pipe.ConnectAsync(connectTimeoutMilliseconds, timeout.Token); }
+        catch (Exception ex) when (ex is TimeoutException or IOException)
+        { throw new AutomationHostUnavailableException(ex); }
         using var reader = new StreamReader(pipe, new UTF8Encoding(false), false, 4096, true);
         using var writer = new StreamWriter(pipe, new UTF8Encoding(false), 4096, true) { AutoFlush = true };
         await writer.WriteLineAsync(JsonSerializer.Serialize(new { method, arguments }, Json));
@@ -87,6 +101,24 @@ public sealed class AutomationPipe : IDisposable
         return line.Length == 0 ? null : line.ToString();
     }
     public void Dispose() { lifetime.Cancel(); }
+}
+
+// Only a failed connection is safe to recover automatically. Once connected, an
+// interrupted reply may mean a mutation completed; never replay that request.
+public sealed class AutomationHostUnavailableException(Exception inner)
+    : IOException("Manager/session host unavailable. Start Account Manager and retry.", inner);
+
+public sealed class RecoveringAutomationClient(string name, Func<Task> ensureHost)
+{
+    public async Task<JsonElement> Call(string method, object arguments)
+    {
+        try { return await AutomationPipe.Call(name, method, arguments, 90); }
+        catch (AutomationHostUnavailableException)
+        {
+            await ensureHost();
+            return await AutomationPipe.Call(name, method, arguments, 90);
+        }
+    }
 }
 
 public static class AutomationErrors

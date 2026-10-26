@@ -173,12 +173,12 @@ internal static class Program
             });
             pipe.Start(); await stop.Task; return;
         }
-        await EnsureHost(repository.Root);
+        var client = new RecoveringAutomationClient(AutomationPipe.Name(repository.Root), () => EnsureHost(repository));
         if (args.Contains("--mcp"))
         {
             using var input = new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false));
             using var output = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true };
-            await ManagerMcp.Run(input, output, (method, value) => AutomationPipe.Call(AutomationPipe.Name(repository.Root), method, value, 90));
+            await ManagerMcp.Run(input, output, (method, value) => client.Call(method, value));
             return;
         }
         var callIndex = Array.IndexOf(args, "--call");
@@ -187,25 +187,50 @@ internal static class Program
         var jsonIndex = Array.IndexOf(args, "--json");
         using var arguments = JsonDocument.Parse(jsonIndex >= 0 && jsonIndex + 1 < args.Length ? args[jsonIndex + 1] : "{}");
         ManagerMcp.Validate(tool, arguments.RootElement);
-        var response = await AutomationPipe.Call(AutomationPipe.Name(repository.Root), tool, arguments.RootElement, 90);
+        var response = await client.Call(tool, arguments.RootElement);
         using var callOutput = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true };
         await callOutput.WriteLineAsync(response.GetRawText());
     }
-    private static async Task EnsureHost(string root)
+    private static async Task EnsureHost(AccountRepository repository)
     {
-        try { _ = await AutomationPipe.Call(AutomationPipe.Name(root), "manager_health", new { }); return; }
-        catch (IOException) { }
-        // ShellExecute detaches all inherited MCP/stdout pipe handles, not just the
-        // three redirected standard handles. This is a preinstalled local executable.
-        var info = new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = true, WindowStyle = ProcessWindowStyle.Hidden, WorkingDirectory = root };
-        info.ArgumentList.Add("--root"); info.ArgumentList.Add(root); info.ArgumentList.Add("--automation-host");
-        using var process = Process.Start(info) ?? throw new IOException("Could not start the headless Manager bridge.");
-        for (var retry = 0; retry < 15; retry++)
+        var root = repository.Root;
+        var path = Path.Combine(root, "bridge-start.lock");
+        PathSafety.NoReparseAncestors(path);
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(25);
+        FileStream? startupLock = null;
+        Process? process = null;
+        try
         {
-            try { _ = await AutomationPipe.Call(AutomationPipe.Name(root), "manager_health", new { }); return; }
-            catch (IOException) { if (process.HasExited) throw new IOException("Another Manager owns the data or the bridge could not start. Existing sessions were preserved."); }
-            await Task.Delay(200);
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                try
+                {
+                    _ = await AutomationPipe.Call(AutomationPipe.Name(root), "manager_health", new { }, 5, 250);
+                    return;
+                }
+                catch (AutomationHostUnavailableException) { }
+                if (startupLock is null)
+                {
+                    try { startupLock = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
+                    catch (IOException) { await Task.Delay(200); continue; }
+                }
+                // A GUI or another bridge may hold the store while initializing.
+                // Wait for its pipe instead of launching competing hosts.
+                if (process is null)
+                {
+                    try { using var storeLock = repository.AcquireLock(); }
+                    catch (IOException) { await Task.Delay(200); continue; }
+                    var info = new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = true,
+                        WindowStyle = ProcessWindowStyle.Hidden, WorkingDirectory = root };
+                    info.ArgumentList.Add("--root"); info.ArgumentList.Add(root); info.ArgumentList.Add("--automation-host");
+                    process = Process.Start(info) ?? throw new IOException("Could not start the headless Manager bridge.");
+                }
+                // A racing GUI can win the store lock after the probe. Keep waiting
+                // for that owner, but start at most one host per recovery attempt.
+                await Task.Delay(200);
+            }
+            throw new IOException("Manager bridge is unavailable or still initializing. Retry after the current Manager operation finishes.");
         }
-        throw new IOException("Manager bridge is still initializing. Retry without starting another job.");
+        finally { process?.Dispose(); startupLock?.Dispose(); }
     }
 }

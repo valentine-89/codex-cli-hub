@@ -18,7 +18,10 @@ jobs:
           node-version: '22'
       - name: Install verified CLI version
         shell: pwsh
-        run: npm install --global @openai/codex@0.163.0
+        run: npm install --global @openai/codex@0.164.0
       - name: Build and test
         shell: pwsh
         run: ./scripts/build.ps1 -SkipPublish
+      - name: MCP bridge recovery
+        shell: pwsh
+        run: ./tests/test-mcp-recovery.ps1 -Manager ./src/CodexAccountManager/bin/Release/net8.0-windows/CodexAccountManager.exe

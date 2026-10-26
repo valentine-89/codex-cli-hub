@@ -1,4 +1,27 @@
-# Validation — v1.12.3, 2026-10-18
+# Validation — v1.12.4, 2026-10-26
+
+- **93/93 .NET regression tests and 4/4 Python maintenance tests passed.** Release build and
+  single-file publish completed without warnings/errors. Packaged MCP keeps the same 16 tools,
+  excludes private account fields and exits on EOF. Isolated GUI startup/render/exit passed.
+- Transport regressions cover saturation at ten connections, subsequent requests, recovery before
+  delivery, application errors and lost replies after delivery. Delivered operations are never replayed.
+- Two packaged MCP clients initialize without a host, concurrently start one host, and recover to
+  one replacement host after only their isolated fixture host exits. Both clients remain connected.
+- Installed **CLI 0.164.0** and **Desktop backend 0.164.0-alpha.11.1** passed all four schema-only
+  integration combinations (each binary, plain/compressed rollouts): cross-profile resume, idle
+  guards, missing-list/archive reproduction, repair, profile deletion, archive/unarchive, transcript
+  hashes and idempotence. No account authentication or model turn was used.
+- Read-only live audit found migration **61**, successful migrations and `quick_check=ok`:
+  176 threads, 11 profile aliases, six broken aliases and zero other validation issues. The six
+  broken references remain pending offline repair while Codex clients are active. Current catalog
+  discovery returned 37 projects, 106 visible sessions and five projectless sessions without warning.
+- The manual repair helper passed syntax validation and refused to start maintenance while live
+  clients were running. No real shared database repair, account deletion or credential change occurred.
+- Windows incident logs show low-memory/resource errors followed by desktop heap exhaustion and
+  a forced restart. They do not establish Manager as the cause; bridge fixes are not a verified
+  remedy for the whole-machine crash. No Windows memory settings were changed.
+
+## Previous validation — v1.12.3, 2026-10-18
 
 - **89/89 .NET regression tests and 4/4 Python maintenance tests passed.** Release build and
   single-file publish completed without warnings/errors. Packaged MCP reports 1.12.3 with the same

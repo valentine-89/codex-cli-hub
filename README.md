@@ -7,7 +7,12 @@ Từ **v1.11.0**, app có MCP điều khiển quota và phiên CLI qua stdio/nam
 Không cần computer-use hoặc mở khóa màn hình. Khi GUI đóng, bridge chạy nền; máy vẫn cần bật và không sleep.
 Cài bằng `pwsh -File ./scripts/install-mcp.ps1`.
 
-**v1.12.3:** sửa project WSL bị hiển thị thành `D:\home\...` và báo thư mục không tồn tại.
+**v1.12.4:** MCP tự kết nối lại khi Manager đóng/mở lại; sửa mất kết nối khi có nhiều yêu cầu đồng thời.
+
+Đăng ký MCP vào executable portable cố định, không trỏ vào thư mục `versions/<version>`.
+Nếu cần sửa đường dẫn phiên cũ, đóng Codex Desktop/CLI và Manager rồi chạy
+`pwsh -File scripts/repair-shared-sessions.ps1`. Lệnh kiểm tra ID/nội dung và xác minh lại qua API;
+không tự dừng ứng dụng hoặc xóa tài khoản.
 Đối chiếu cwd gốc theo ID phiên và ghép vào project WSL đã lưu; không sửa database hay lịch sử chat.
 
 **v1.12.2:** hỗ trợ schema Codex đến migration 61, sửa lỗi từ chối xóa tài khoản sau khi Codex
@@ -270,7 +275,7 @@ junction mới xóa thư mục app. Không giả định mọi công cụ recurs
 
 ## Kiểm tra và sửa đường dẫn phiên (1.12.2)
 
-Phạm vi hiện tại: CLI **0.163.0**, Desktop backend **0.163.0-alpha.10.2**, `state_5.sqlite`
+Phạm vi hiện tại: CLI **0.164.0**, Desktop backend **0.164.0-alpha.11.1**, `state_5.sqlite`
 đến migration **61**. Dùng `winsqlite3.dll` có sẵn trên Windows; không cần Python hoặc SQLite CLI.
 Schema/database/trigger không nhận diện được sẽ chặn ghi, không tự chọn tương thích bản cũ.
 Codex có thể giữ đường dẫn `.jsonl` trong SQLite dù file trên đĩa đã thành `.jsonl.zst`.

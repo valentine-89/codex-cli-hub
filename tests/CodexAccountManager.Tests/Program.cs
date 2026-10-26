@@ -1199,6 +1199,7 @@ tests.Add(("managed CLI resume, send, approval, steer, interrupt and stop use pe
     using var saved = System.Text.Json.JsonDocument.Parse(File.ReadAllText(runtime.PathFor(record.Id, ".state.json")));
     Assert(saved.RootElement.GetProperty("status").GetString() == "stopped", "Final session state not persisted");
 }));
+AutomationTransportTests.Register(tests, root);
 var sessionTestStart = tests.Count;
 SessionStoreTests.Register(tests, root);
 var selectedTests = args.Contains("--session-store-tests") ? tests.Skip(sessionTestStart).ToArray() : tests.ToArray();

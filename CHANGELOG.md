@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.12.4 — 2026-10-26
+
+- Recover existing MCP clients after the Manager GUI or background bridge closes. Initialize MCP without starting a host; start one on demand and serialize competing startup attempts across processes.
+- Retry only failures before a pipe connection is established. Never replay a delivered operation after a lost reply or application error.
+- Keep the named-pipe listener alive when ten requests are in flight, with bounded connections and backpressure instead of an unobserved listener failure.
+- Verify current CLI 0.164.0 and Desktop backend 0.164.0-alpha.11.1 against plain and compressed session fixtures. Retain schema 59–61 guards and existing MCP tools.
+- Add an immediate offline path-repair script with transcript hashes and API verification; it does not wait, stop applications or delete accounts.
+
 ## 1.12.3 — 2026-10-18
 
 - Fix WSL projects shown as missing `D:\home\...` folders when Windows app-server serializes a Linux cwd as a local drive path. Recover matching original cwd values by thread ID using read-only SQLite; retain RPC membership, titles and ordering.

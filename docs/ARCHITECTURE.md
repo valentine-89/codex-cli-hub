@@ -121,7 +121,7 @@ dependency. Supported migration 59, required column types and known trigger even
 before writes. The repair command checks the current paginated API before updates, then optionally
 verifies visibility with `--verify-api`. Audit never starts an app-server. Unknown state database
 generations, failed migrations and trigger changes fail closed.
-The current integration targets are CLI 0.162.1 and Desktop backend 0.162.0-alpha.17.2.
+The current integration targets are CLI 0.164.0 and Desktop backend 0.164.0-alpha.11.1.
 
 Only managed profile aliases into shared `sessions`/`archived_sessions` become repair candidates.
 Existing canonical device-prefixed paths remain unchanged. Every file header must identify the same
@@ -159,6 +159,22 @@ without making database backups. Existing clients remain on their original binar
 Source control excludes all runtime account data. Release ZIPs use an explicit allowlist:
 exactly `CodexAccountManager.exe`. Public documentation remains on GitHub. Never zip a used portable directory wholesale.
 The .NET apphost provides a runtime download dialog when the required desktop runtime is absent.
+
+### MCP recovery (1.12.4)
+
+MCP initialization/tool listing does not launch a bridge. A tool call reconnects on demand after a
+failed pipe connection; only this pre-delivery failure is retried. A lost response, protocol error or
+operation error is returned to the caller without replay. `bridge-start.lock` serializes startup
+across clients; a held account-store lock makes startup wait for the existing GUI/host, with a
+25-second bound and at most one child launch per attempt. Workers and CLI terminals are untouched.
+The listener reserves one of ten connection slots before creating each Windows pipe instance, so
+capacity causes backpressure instead of terminating the listener. Each connection retains its
+90-second read deadline and 1 MiB input limit.
+
+Register MCP against the stable portable executable, not a `versions/<version>` staging path.
+`scripts/repair-shared-sessions.ps1` is an immediate, user-run offline repair: all clients must
+already be closed, the normal database guards apply, and transcript hashes/API visibility are checked.
+It does not schedule work, stop clients, remove accounts or promote a release.
 
 ## Interactive MCP sessions (1.11.1)
 MCP start/resume/switch defaults to a visible PowerShell 7 terminal and passes `text` once as a quoted positional CLI prompt after `--`. Native TUI owns subsequent keyboard input. The Manager retains process identity, account, cwd and exact stored thread; quota and bounded rollout reads require no desktop access. Explicit `visible=false` selects the independent app-server host for full protocol control.
