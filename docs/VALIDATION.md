@@ -1,4 +1,19 @@
-# Validation — v1.12.4, 2026-10-26
+# Validation — v1.12.5, 2026-11-01
+
+- **96/96 .NET regression tests and 4/4 Python maintenance tests passed.** New coverage verifies
+  project rename refresh, multiple Windows/WSL roots, Unicode labels, exact-root matching,
+  conflicting/blank names, unchanged MCP fields and preservation of chat names, IDs and paths.
+- A real WinForms picker test searches the new project name after Refresh, retains the selected
+  chat and confirms Resume returns the original working directory and thread ID.
+- Reproduced the live mismatch: Desktop stores project name `Bikun` with roots `D:\VSYS\Bikun`
+  and the WSL `krakun` folder. Manager 1.12.4 derived the second label from its folder name.
+  The corrected read-only catalog labels both roots `Bikun`, retaining 38 projects, 112 sessions
+  and six projectless sessions without a warning. Existing paths and session metadata are preserved.
+- Live catalog verification used CLI 0.165.0 and shared Desktop metadata; the installed Desktop
+  backend is 0.166.0-alpha.5.1. The rename issue comes from label selection, not transcript compression.
+  This release does not extend offline maintenance support to the newly observed migration 62.
+
+## Previous validation — v1.12.4, 2026-10-26
 
 - **93/93 .NET regression tests and 4/4 Python maintenance tests passed.** Release build and
   single-file publish completed without warnings/errors. Packaged MCP keeps the same 16 tools,

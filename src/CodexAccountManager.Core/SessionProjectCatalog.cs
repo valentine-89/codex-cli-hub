@@ -4,7 +4,10 @@ namespace CodexAccountManager.Core;
 
 public sealed record SessionProject(string Directory, DateTime LastUsedUtc, int SessionCount, bool Exists)
 {
-    public string Name => Path.GetFileName(Path.TrimEndingDirectorySeparator(Directory)) is { Length: > 0 } name ? name : Directory;
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? DisplayName { get; init; }
+    public string Name => !string.IsNullOrWhiteSpace(DisplayName) ? DisplayName
+        : Path.GetFileName(Path.TrimEndingDirectorySeparator(Directory)) is { Length: > 0 } name ? name : Directory;
     public override string ToString() => Name + "  —  " + Directory + (Exists ? "" : "  — no longer exists");
 }
 public sealed record ProjectCatalog(IReadOnlyList<SessionProject> Projects, int SkippedFiles)

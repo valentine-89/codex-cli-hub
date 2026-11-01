@@ -93,7 +93,7 @@ public sealed class ProjectPickerForm : Form
         var previous = (projects.SelectedItem as SessionProject)?.Directory;
         var term = search.Text.Trim();
         projects.BeginUpdate(); projects.Items.Clear();
-        foreach (var project in catalog.Projects.Where(p => p.Directory.Contains(term, StringComparison.OrdinalIgnoreCase)
+        foreach (var project in catalog.Projects.Where(p => Matches(p, term)
             || catalog.Sessions.Any(s => !s.IsProjectless && Same(s.WorkingDirectory, p.Directory) && Matches(s, term))))
             projects.Items.Add(project);
         if (projects.Items.Count > 0)
@@ -107,12 +107,14 @@ public sealed class ProjectPickerForm : Form
         var project = projects.SelectedItem as SessionProject;
         var term = search.Text.Trim();
         Fill(projectChats, catalog.Sessions.Where(s => !s.IsProjectless && Same(s.WorkingDirectory, project?.Directory)
-            && (project!.Directory.Contains(term, StringComparison.OrdinalIgnoreCase) || Matches(s, term))));
+            && (Matches(project!, term) || Matches(s, term))));
         UpdateActions();
     }
     private static bool Same(string? a, string? b) => a is not null && b is not null && a.Equals(b, StringComparison.OrdinalIgnoreCase);
     private static bool Matches(CatalogSession s, string term) => s.Title.Contains(term, StringComparison.OrdinalIgnoreCase)
         || s.Id.Contains(term, StringComparison.OrdinalIgnoreCase);
+    private static bool Matches(SessionProject p, string term) => p.Name.Contains(term, StringComparison.OrdinalIgnoreCase)
+        || p.Directory.Contains(term, StringComparison.OrdinalIgnoreCase);
     private static void Fill(ListBox list, IEnumerable<CatalogSession> sessions)
     {
         var previous = (list.SelectedItem as CatalogSession)?.Id;

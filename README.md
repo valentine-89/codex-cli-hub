@@ -7,7 +7,7 @@ Từ **v1.11.0**, app có MCP điều khiển quota và phiên CLI qua stdio/nam
 Không cần computer-use hoặc mở khóa màn hình. Khi GUI đóng, bridge chạy nền; máy vẫn cần bật và không sleep.
 Cài bằng `pwsh -File ./scripts/install-mcp.ps1`.
 
-**v1.12.4:** MCP tự kết nối lại khi Manager đóng/mở lại; sửa mất kết nối khi có nhiều yêu cầu đồng thời.
+**v1.12.5:** Hiển thị và tìm kiếm theo tên dự án đã đổi trong Codex Desktop, kể cả khi thư mục WSL vẫn mang tên cũ. Nhấn Refresh trong cửa sổ chọn phiên để cập nhật.
 
 Đăng ký MCP vào executable portable cố định, không trỏ vào thư mục `versions/<version>`.
 Nếu cần sửa đường dẫn phiên cũ, đóng Codex Desktop/CLI và Manager rồi chạy

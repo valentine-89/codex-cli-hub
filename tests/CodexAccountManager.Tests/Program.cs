@@ -143,7 +143,7 @@ if (args.Length == 3 && args[0] == "--workspace-catalog")
     var timer = System.Diagnostics.Stopwatch.StartNew();
     var result = await new WorkspaceCatalogService().ReadAsync(deps, args[2], args[1]);
     Console.WriteLine($"Projects: {result.Projects.Count}; sessions: {result.Sessions.Count}; projectless: {result.Sessions.Count(s => s.IsProjectless)}; warning: {result.Warning ?? "none"}; elapsed: {timer.ElapsedMilliseconds} ms");
-    foreach (var project in result.Projects) Console.WriteLine($"{project.Directory} (sessions={project.SessionCount}, exists={project.Exists})");
+    foreach (var project in result.Projects) Console.WriteLine($"{project.Name} — {project.Directory} (sessions={project.SessionCount}, exists={project.Exists})");
     return 0;
 }
 
@@ -1200,6 +1200,7 @@ tests.Add(("managed CLI resume, send, approval, steer, interrupt and stop use pe
     Assert(saved.RootElement.GetProperty("status").GetString() == "stopped", "Final session state not persisted");
 }));
 AutomationTransportTests.Register(tests, root);
+DesktopProjectNameTests.Register(tests, root);
 var sessionTestStart = tests.Count;
 SessionStoreTests.Register(tests, root);
 var selectedTests = args.Contains("--session-store-tests") ? tests.Skip(sessionTestStart).ToArray() : tests.ToArray();

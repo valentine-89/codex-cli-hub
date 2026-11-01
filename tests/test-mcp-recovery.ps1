@@ -15,7 +15,7 @@ function Start-Client {
     $client = [Diagnostics.Process]::Start($info)
     Send $client @{jsonrpc='2.0';id=1;method='initialize';params=@{protocolVersion='2025-11-25';capabilities=@{};clientInfo=@{name='recovery-test';version='1'}}}
     $hello = Receive $client 1
-    if ($hello.serverInfo.version -ne '1.12.4') { throw 'Wrong MCP version.' }
+    if ($hello.serverInfo.version -ne '1.12.5') { throw 'Wrong MCP version.' }
     Send $client @{jsonrpc='2.0';method='notifications/initialized'}
     return $client
 }
@@ -49,7 +49,7 @@ try {
     foreach ($client in $clients) { Send $client (HealthRequest 2) }
     $health = @($clients | ForEach-Object { (Receive $_ 2).structuredContent })
     foreach ($item in $health) { if (-not $hosts.Contains($item.processId)) { $hosts.Add($item.processId) } }
-    if ($hosts.Count -ne 1 -or $health[0].version -ne '1.12.4') { throw 'Concurrent startup created competing bridges.' }
+    if ($hosts.Count -ne 1 -or $health[0].version -ne '1.12.5') { throw 'Concurrent startup created competing bridges.' }
     Stop-FixtureHost $hosts[0]
     # Keep the original MCP clients alive while simulating a bridge crash/GUI exit.
     foreach ($client in $clients) { Send $client (HealthRequest 3) }
@@ -59,7 +59,7 @@ try {
         throw 'Clients did not recover to one new bridge.'
     }
     foreach ($client in $clients) { $client.StandardInput.Close(); if (-not $client.WaitForExit(5000)) { throw 'Client did not exit on EOF.' } }
-    [pscustomobject]@{version='1.12.4';clients=2;lazyStartup=$true;singleHost=$true;recoveredWithoutClientRestart=$true}
+    [pscustomobject]@{version='1.12.5';clients=2;lazyStartup=$true;singleHost=$true;recoveredWithoutClientRestart=$true}
 } finally {
     foreach ($client in $clients) { if (-not $client.HasExited) { $client.Kill(); $client.WaitForExit() }; $client.Dispose() }
     # Also find any fixture-only host whose startup failed before a response.

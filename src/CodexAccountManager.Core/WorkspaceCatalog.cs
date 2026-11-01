@@ -49,6 +49,7 @@ public sealed class WorkspaceCatalogService(Logger? logger = null)
         var projectless = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var assigned = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var projectRoots = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+        var rootNames = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
         var threadProjects = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var projectlessDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var state = Path.Combine(sharedHome, ".codex-global-state.json");
@@ -68,8 +69,16 @@ public sealed class WorkspaceCatalogService(Logger? logger = null)
                         AddPaths(entry.Value, "rootPaths");
                         if (entry.Value.ValueKind == JsonValueKind.Object
                             && entry.Value.TryGetProperty("rootPaths", out var paths) && paths.ValueKind == JsonValueKind.Array)
+                        {
                             projectRoots[entry.Name] = paths.EnumerateArray().Where(p => p.ValueKind == JsonValueKind.String)
                                 .Select(p => TryNormalize(p.GetString())).OfType<string>().ToArray();
+                            if (CodexThreadReader.Text(entry.Value, "name") is { } name)
+                                foreach (var root in projectRoots[entry.Name])
+                                {
+                                    if (!rootNames.TryGetValue(root, out var names)) rootNames[root] = names = new(StringComparer.Ordinal);
+                                    names.Add(name);
+                                }
+                        }
                     }
                 if (json.TryGetProperty("projectless-thread-ids", out var ids) && ids.ValueKind == JsonValueKind.Array)
                     foreach (var id in ids.EnumerateArray()) if (id.ValueKind == JsonValueKind.String) projectless.Add(id.GetString()!);
@@ -117,7 +126,11 @@ public sealed class WorkspaceCatalogService(Logger? logger = null)
             folders[path] = new(path, old is not null && old.LastUsedUtc > session.UpdatedUtc ? old.LastUsedUtc : session.UpdatedUtc,
                 (old?.SessionCount ?? 0) + 1, WorkspacePaths.Exists(path));
         }
-        return new(folders.Values.OrderByDescending(p => p.Exists).ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+        // A Desktop project may have multiple roots with different folder names.
+        // Apply its label only to exact roots with an unambiguous name; keep launch paths intact.
+        var namedFolders = folders.Values.Select(p => rootNames.TryGetValue(p.Directory, out var names) && names.Count == 1
+            ? p with { DisplayName = names.Single() } : p);
+        return new(namedFolders.OrderByDescending(p => p.Exists).ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(p => p.Directory, StringComparer.OrdinalIgnoreCase).ToArray(), normalized, warning);
 
         void AddPaths(JsonElement value, string key)

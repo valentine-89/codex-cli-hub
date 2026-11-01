@@ -113,6 +113,15 @@ the shared sessions directory.
 
 ## Distribution boundary
 
+### Desktop project labels (1.12.5)
+
+The workspace catalog reads `local-projects.*.name` and normalized `rootPaths` from the shared
+Desktop state on each refresh. An exact root with one distinct nonblank label uses that display
+name. Multiple roots remain separate launch choices with their original paths; nested folders do
+not inherit a parent label. Conflicting labels keep the folder name. The picker searches both
+display names and paths and keeps matching projects' chats visible. Chat names still come from
+`thread/list`; no session, directory or Desktop metadata is renamed by this display mapping.
+
 ### Shared-session maintenance (1.12.0)
 
 `--session-store-audit` reads `state_5.sqlite` in a read transaction. `--session-store-repair`

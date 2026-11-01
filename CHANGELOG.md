@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.12.5 — 2026-11-01
+
+- Show Desktop project names from `local-projects` for every matching root, including WSL paths whose folder names differ after a project rename. Refresh rereads the saved name.
+- Search project labels as well as directory paths and chat titles; searching a renamed project keeps its chats available to resume.
+- Preserve launch paths, chat titles, IDs, project membership and the existing MCP response fields. Conflicting root labels keep the folder name; discovery does not write Desktop metadata or session databases.
+
 ## 1.12.4 — 2026-10-26
 
 - Recover existing MCP clients after the Manager GUI or background bridge closes. Initialize MCP without starting a host; start one on demand and serialize competing startup attempts across processes.
