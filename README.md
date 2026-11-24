@@ -7,7 +7,8 @@ Từ **v1.11.0**, app có MCP điều khiển quota và phiên CLI qua stdio/nam
 Không cần computer-use hoặc mở khóa màn hình. Khi GUI đóng, bridge chạy nền; máy vẫn cần bật và không sleep.
 Cài bằng `pwsh -File ./scripts/install-mcp.ps1`.
 
-**v1.12.5:** Hiển thị và tìm kiếm theo tên dự án đã đổi trong Codex Desktop, kể cả khi thư mục WSL vẫn mang tên cũ. Nhấn Refresh trong cửa sổ chọn phiên để cập nhật.
+**v1.12.6:** Tương thích schema 64 và cách lưu dự án mới của Codex. Đọc tên/đường dẫn dự án qua API hiện tại; giữ danh sách thành công gần nhất nếu API lỗi. Nhấn Refresh trong cửa sổ chọn phiên để cập nhật.
+Đã kiểm thử CLI **0.170.0** và Desktop backend **0.171.0-alpha.13**. Danh sách dự án yêu cầu API `project/list`; không tự quay về cache JSON cũ khi API không hỗ trợ.
 
 Đăng ký MCP vào executable portable cố định, không trỏ vào thư mục `versions/<version>`.
 Nếu cần sửa đường dẫn phiên cũ, đóng Codex Desktop/CLI và Manager rồi chạy
@@ -275,8 +276,8 @@ junction mới xóa thư mục app. Không giả định mọi công cụ recurs
 
 ## Kiểm tra và sửa đường dẫn phiên (1.12.2)
 
-Phạm vi hiện tại: CLI **0.164.0**, Desktop backend **0.164.0-alpha.11.1**, `state_5.sqlite`
-đến migration **61**. Dùng `winsqlite3.dll` có sẵn trên Windows; không cần Python hoặc SQLite CLI.
+Phạm vi hiện tại: CLI **0.170.0**, Desktop backend **0.171.0-alpha.13**, `state_5.sqlite`
+đến migration **64**. Dùng `winsqlite3.dll` có sẵn trên Windows; không cần Python hoặc SQLite CLI.
 Schema/database/trigger không nhận diện được sẽ chặn ghi, không tự chọn tương thích bản cũ.
 Codex có thể giữ đường dẫn `.jsonl` trong SQLite dù file trên đĩa đã thành `.jsonl.zst`.
 Manager kiểm tra cả hai dạng, ưu tiên JSONL đang hoạt động; định dạng nén không bị coi là mất file.

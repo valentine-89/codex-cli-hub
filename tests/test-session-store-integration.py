@@ -176,6 +176,10 @@ def check(binary, args):
             compress_rollout(canonical)
         with closing(sqlite3.connect(shared / "state_5.sqlite")) as db:
             now = int(time.time())
+            project_id = str(uuid.uuid4())
+            db.execute("INSERT INTO projects(id,name,position,created_at_ms,updated_at_ms) VALUES(?,?,0,?,?)", (project_id, "Current project", now * 1000, now * 1000))
+            db.execute("INSERT INTO project_roots(project_id,position,path) VALUES(?,0,?)", (project_id, str(root)))
+            db.execute("INSERT INTO session_model_ids VALUES(?,'fixture','keep-key',0,'keep-state')", (tid,))
             db.execute("INSERT INTO backfill_state(id,status,last_success_at,updated_at) VALUES(1,'complete',?,?)", (now, now))
             db.execute("INSERT INTO threads(id,rollout_path,created_at,updated_at,source,model_provider,cwd,title,sandbox_policy,approval_mode,preview,history_mode,cli_version,first_user_message) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                        (tid, str(alias), now, now, "cli", "openai", str(root), "Fixture title", '{"type":"read-only"}', "never", "Fixture preview", "paginated", "0.162.1", "Fixture message"))
@@ -184,6 +188,10 @@ def check(binary, args):
                   "sourceKinds": ["cli", "vscode", "appServer"], "useStateDbOnly": True}
         rpc = Rpc(binary, profiles[1], shared)
         try:
+            project = rpc.ok("project/list", {"limit": 100})["data"]
+            assert len(project) == 1 and project[0]["id"] == project_id
+            rpc.ok("project/update", {"projectId": project_id, "name": "Renamed project"})
+            assert rpc.ok("project/list", {"limit": 100})["data"][0]["name"] == "Renamed project"
             assert tid in [r["id"] for r in rpc.ok("thread/list", params)["data"]]
             rpc.ok("thread/read", {"threadId": tid, "includeTurns": False})
             # Production repair must reject even this synthetic database while a client is running.
@@ -194,7 +202,7 @@ def check(binary, args):
             wrong_name = run(args.manager, "--root", app, "--delete-account", profiles[1].name, "--expected-account-name", "wrong fixture")
             assert wrong_name.returncode != 0 and "name changed" in wrong_name.stderr
             assert profiles[1].exists() and len(json.loads((app / "accounts.json").read_text())["accounts"]) == 1
-            rpc.ok("thread/resume", {"threadId": tid, "cwd": str(root), "approvalPolicy": "never", "sandbox": "read-only"})
+            rpc.ok("thread/resume", {"threadId": tid, "cwd": str(root), "approvalPolicy": "never", "sandbox": "read-only", "excludeTurns": True})
         finally:
             rpc.close()
         # Resume may append lifecycle metadata; repair must preserve the resulting bytes.
@@ -221,9 +229,16 @@ def check(binary, args):
         audit = run(args.manager, "--root", app, "--session-store-audit")
         assert audit.returncode == 0, audit.stderr
         assert json.loads(audit.stdout)["audit"]["brokenPaths"] == 1
+        with closing(sqlite3.connect(shared / "state_5.sqlite")) as db:
+            columns = [r[1] for r in db.execute("PRAGMA table_info(threads)") if r[1] != "rollout_path"]
+            metadata = db.execute("SELECT " + ",".join(columns) + " FROM threads WHERE id=?", (tid,)).fetchone()
         repaired = run(args.test_host, "--session-store-fixture-repair", app, profiles[1].name)
         assert repaired.returncode == 0, (repaired.stdout, repaired.stderr)
         assert json.loads(repaired.stdout)["changed"] == 1
+        with closing(sqlite3.connect(shared / "state_5.sqlite")) as db:
+            assert db.execute("SELECT " + ",".join(columns) + " FROM threads WHERE id=?", (tid,)).fetchone() == metadata
+            assert db.execute("SELECT initial_state FROM session_model_ids WHERE session_id=?", (tid,)).fetchone() == ("keep-state",)
+            assert db.execute("SELECT name FROM projects WHERE id=?", (project_id,)).fetchone() == ("Renamed project",)
         assert not profiles[1].exists()
         assert json.loads((app / "accounts.json").read_text())["accounts"] == []
         listed = run(args.test_host, "--session-store-fixture-list", app, binary)

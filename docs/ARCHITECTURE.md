@@ -113,24 +113,32 @@ the shared sessions directory.
 
 ## Distribution boundary
 
-### Desktop project labels (1.12.5)
+### Desktop project labels (1.12.6)
 
-The workspace catalog reads `local-projects.*.name` and normalized `rootPaths` from the shared
-Desktop state on each refresh. An exact root with one distinct nonblank label uses that display
+The workspace catalog reads paginated `project/list` on the same short-lived app-server connection
+as `thread/list`. Both must succeed before replacing the cached catalog. Current API projects own
+names and roots; the retired `local-projects` JSON cache cannot override them or restore deleted
+projects. An exact root with one distinct nonblank label uses that display
 name. Multiple roots remain separate launch choices with their original paths; nested folders do
 not inherit a parent label. Conflicting labels keep the folder name. The picker searches both
 display names and paths and keeps matching projects' chats visible. Chat names still come from
 `thread/list`; no session, directory or Desktop metadata is renamed by this display mapping.
+Only assignments explicitly pending Desktop migration may use a legacy project ID, mapped to an
+existing API project for the same shared home. Owner-scoped projectless outputs are read only when
+their owner is unambiguous. Multiple owner entries are never combined. The metadata-only managed
+resume request sets `excludeTurns=true`, avoiding a full history response.
 
 ### Shared-session maintenance (1.12.0)
 
 `--session-store-audit` reads `state_5.sqlite` in a read transaction. `--session-store-repair`
 holds the Manager lock and uses Windows `winsqlite3.dll`, with no bundled native library or Python
-dependency. Supported migration 59, required column types and known trigger events are checked
+dependency. Supported migrations 59–64, required column types and known trigger events are checked
 before writes. The repair command checks the current paginated API before updates, then optionally
 verifies visibility with `--verify-api`. Audit never starts an app-server. Unknown state database
 generations, failed migrations and trigger changes fail closed.
-The current integration targets are CLI 0.164.0 and Desktop backend 0.164.0-alpha.11.1.
+The current integration targets are CLI 0.170.0 and Desktop backend 0.171.0-alpha.13. Migrations
+62–64 add attached-parent metadata, session model IDs and interactive-listing indexes; they do not
+change the path columns or introduce path-update triggers.
 
 Only managed profile aliases into shared `sessions`/`archived_sessions` become repair candidates.
 Existing canonical device-prefixed paths remain unchanged. Every file header must identify the same

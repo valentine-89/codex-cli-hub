@@ -107,11 +107,11 @@ internal static class SessionStoreTests
         Test("unknown schema and custom triggers block writes", () =>
         {
             var f = new StoreFixture(testRoot); var session = f.Thread(f.Profile());
-            using (var db = f.Db()) db.Query("INSERT INTO _sqlx_migrations VALUES(62,1)");
+            using (var db = f.Db()) db.Query("INSERT INTO _sqlx_migrations VALUES(65,1)");
             Reject(() => f.Service.Audit());
             using (var db = f.Db())
             {
-                db.Query("DELETE FROM _sqlx_migrations WHERE version=62");
+                db.Query("DELETE FROM _sqlx_migrations WHERE version=65");
                 db.Query("CREATE TRIGGER unexpected AFTER UPDATE ON threads BEGIN UPDATE threads SET title='changed' WHERE id=NEW.id; END");
             }
             Reject(() => f.Service.Audit()); Check(f.Path(session.ThreadId) == session.PreviousPath, "Unknown schema was modified");
@@ -122,9 +122,9 @@ internal static class SessionStoreTests
             }
             Reject(() => f.Service.Audit());
         });
-        Test("schema 60 and 61 repair paths without changing read state or metadata", () =>
+        Test("schemas 60 through 64 repair paths without changing read state or metadata", () =>
         {
-            foreach (var version in new[] { 60, 61 })
+            foreach (var version in new[] { 60, 61, 62, 63, 64 })
             {
                 var f = new StoreFixture(testRoot); var session = f.Thread(f.Profile()); Compress(session.CanonicalPath);
                 using (var db = f.Db())
@@ -132,10 +132,28 @@ internal static class SessionStoreTests
                     for (var v = 60; v <= version; v++) db.Query("INSERT INTO _sqlx_migrations VALUES(?,1)", v.ToString());
                     db.Query("CREATE TABLE guardian_review_feedback(id TEXT PRIMARY KEY NOT NULL,thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,record BLOB NOT NULL)");
                     db.Query("INSERT INTO guardian_review_feedback VALUES('fixture',?,X'0102')", session.ThreadId);
-                    if (version == 61)
+                    if (version >= 61)
                     {
                         db.Query("CREATE TABLE thread_read_receipts(thread_id TEXT PRIMARY KEY NOT NULL,first_unread_turn TEXT,revision TEXT NOT NULL,last_published_turn TEXT)");
                         db.Query("INSERT INTO thread_read_receipts VALUES(?,'unread','keep revision','published')", session.ThreadId);
+                    }
+                    if (version >= 62)
+                    {
+                        db.Query("ALTER TABLE threads ADD COLUMN attached_thread_parent_id TEXT");
+                        db.Query("UPDATE threads SET attached_thread_parent_id='keep parent'");
+                        db.Query("CREATE INDEX idx_threads_attached_parent ON threads(attached_thread_parent_id, archived) WHERE attached_thread_parent_id IS NOT NULL");
+                    }
+                    if (version >= 63)
+                    {
+                        db.Query("CREATE TABLE session_model_ids(session_id TEXT NOT NULL,kind TEXT NOT NULL,external_key TEXT NOT NULL,ordinal INTEGER NOT NULL CHECK(ordinal>=0),initial_state TEXT,PRIMARY KEY(session_id,kind,external_key),UNIQUE(session_id,kind,ordinal),CHECK((ordinal=0)=(initial_state IS NOT NULL)))");
+                        db.Query("INSERT INTO session_model_ids VALUES(?,'model','key',0,'keep initial state')", session.ThreadId);
+                    }
+                    if (version >= 64)
+                    {
+                        db.Query("ALTER TABLE threads ADD COLUMN preview TEXT NOT NULL DEFAULT 'keep preview'");
+                        db.Query("ALTER TABLE threads ADD COLUMN source TEXT NOT NULL DEFAULT 'cli'");
+                        db.Query("ALTER TABLE threads ADD COLUMN updated_at_ms INTEGER NOT NULL DEFAULT 42000");
+                        db.Query("CREATE INDEX idx_threads_interactive_updated_at_ms ON threads(archived,updated_at_ms DESC,id DESC) WHERE archived=0 AND preview<>'' AND attached_thread_parent_id IS NULL AND source IN ('cli','vscode','{\"custom\":\"atlas\"}','{\"custom\":\"chatgpt\"}')");
                     }
                 }
                 var before = f.UnrelatedColumns(); var audit = f.Service.Audit();
@@ -144,7 +162,10 @@ internal static class SessionStoreTests
                 Check(f.UnrelatedColumns() == before, "Non-path metadata changed");
                 using var check = f.Db();
                 Check(check.Query("SELECT hex(record) FROM guardian_review_feedback").Single()[0] == "0102", "Guardian feedback changed");
-                if (version == 61) Check(check.Query("SELECT revision FROM thread_read_receipts").Single()[0] == "keep revision", "Read state changed");
+                if (version >= 61) Check(check.Query("SELECT revision FROM thread_read_receipts").Single()[0] == "keep revision", "Read state changed");
+                if (version >= 62) Check(check.Query("SELECT attached_thread_parent_id FROM threads").Single()[0] == "keep parent", "Attached parent changed");
+                if (version >= 63) Check(check.Query("SELECT initial_state FROM session_model_ids").Single()[0] == "keep initial state", "Model IDs changed");
+                if (version >= 64) Check(check.Query("SELECT preview,updated_at_ms FROM threads").Single().SequenceEqual(new[] { "keep preview", "42000" }), "Listing metadata changed");
             }
         });
         Test("failed migration and supported migration change reject writes", () =>

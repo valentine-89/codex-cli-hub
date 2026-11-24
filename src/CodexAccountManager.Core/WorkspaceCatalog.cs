@@ -22,9 +22,9 @@ public sealed class WorkspaceCatalogService(Logger? logger = null)
         var key = PathSafety.Canonical(sharedHome) + "|" + PathSafety.Canonical(profileHome);
         try
         {
-            var sessions = await new CodexThreadReader(logger).ReadAsync(dependencies, profileHome, sharedHome, cancellationToken);
+            var workspace = await new CodexThreadReader(logger).ReadWorkspaceAsync(dependencies, profileHome, sharedHome, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
-            var catalog = Build(sharedHome, sessions, cancellationToken: cancellationToken);
+            var catalog = Build(sharedHome, workspace.Sessions, cancellationToken: cancellationToken, currentProjects: workspace.Projects);
             lastGood[key] = catalog;
             return catalog;
         }
@@ -43,7 +43,7 @@ public sealed class WorkspaceCatalogService(Logger? logger = null)
     public static string ChatRoot(string sharedHome) => Path.Combine(PathSafety.Canonical(sharedHome), "manager-chats");
 
     public static WorkspaceCatalog Build(string sharedHome, IReadOnlyList<CatalogSession> sessions, string? warning = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, IReadOnlyList<CodexProject>? currentProjects = null)
     {
         var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var projectless = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -61,9 +61,13 @@ public sealed class WorkspaceCatalogService(Logger? logger = null)
                 using var stream = new FileStream(state, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
                 using var document = JsonDocument.Parse(stream);
                 var json = document.RootElement;
-                AddPaths(json, "electron-saved-workspace-roots");
-                AddPaths(json, "active-workspace-roots");
-                if (json.TryGetProperty("local-projects", out var local) && local.ValueKind == JsonValueKind.Object)
+                if (json.ValueKind != JsonValueKind.Object) throw new JsonException("Invalid Desktop state object.");
+                if (currentProjects is null)
+                {
+                    AddPaths(json, "electron-saved-workspace-roots");
+                    AddPaths(json, "active-workspace-roots");
+                }
+                if (currentProjects is null && json.TryGetProperty("local-projects", out var local) && local.ValueKind == JsonValueKind.Object)
                     foreach (var entry in local.EnumerateObject())
                     {
                         AddPaths(entry.Value, "rootPaths");
@@ -82,11 +86,29 @@ public sealed class WorkspaceCatalogService(Logger? logger = null)
                     }
                 if (json.TryGetProperty("projectless-thread-ids", out var ids) && ids.ValueKind == JsonValueKind.Array)
                     foreach (var id in ids.EnumerateArray()) if (id.ValueKind == JsonValueKind.String) projectless.Add(id.GetString()!);
+                var migration = ScopedState(json, "app-server-projects-migration-by-host");
+                var hostKey = "local:" + PathSafety.Canonical(sharedHome);
+                var pending = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (migration.ValueKind == JsonValueKind.Object && migration.TryGetProperty(hostKey, out var hostMigration)
+                    && hostMigration.ValueKind == JsonValueKind.Object
+                    && hostMigration.TryGetProperty("pendingThreadAssignmentIds", out var pendingIds) && pendingIds.ValueKind == JsonValueKind.Array)
+                    foreach (var id in pendingIds.EnumerateArray()) if (id.ValueKind == JsonValueKind.String) pending.Add(id.GetString()!);
+                var projectMapping = json.TryGetProperty("app-server-project-id-by-legacy-project-id-by-host", out var mappings)
+                    && mappings.ValueKind == JsonValueKind.Object && mappings.TryGetProperty(hostKey, out var hostMappings) ? hostMappings : default;
                 if (json.TryGetProperty("thread-project-assignments", out var assignments) && assignments.ValueKind == JsonValueKind.Object)
                     foreach (var entry in assignments.EnumerateObject())
                         if (CodexThreadReader.Text(entry.Value, "projectId") is { } projectId)
-                        { assigned.Add(entry.Name); threadProjects[entry.Name] = projectId; }
-                if (json.TryGetProperty("thread-projectless-output-directories", out var outputs) && outputs.ValueKind == JsonValueKind.Object)
+                        {
+                            if (currentProjects is not null)
+                            {
+                                if (!pending.Contains(entry.Name) || CodexThreadReader.Text(projectMapping, projectId) is not { } mapped
+                                    || !currentProjects.Any(p => p.Id == mapped)) continue;
+                                projectId = mapped;
+                            }
+                            assigned.Add(entry.Name); threadProjects[entry.Name] = projectId;
+                        }
+                var outputs = ScopedState(json, "thread-projectless-output-directories");
+                if (outputs.ValueKind == JsonValueKind.Object)
                     foreach (var entry in outputs.EnumerateObject())
                     {
                         projectless.Add(entry.Name);
@@ -97,6 +119,19 @@ public sealed class WorkspaceCatalogService(Logger? logger = null)
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
             { warning = (warning is null ? "" : warning + " ") + "Desktop workspace metadata unavailable."; }
         }
+
+        if (currentProjects is not null)
+            foreach (var project in currentProjects)
+            {
+                var paths = project.Roots.Select(TryNormalize).OfType<string>().ToArray();
+                projectRoots[project.Id] = paths;
+                foreach (var path in paths)
+                {
+                    roots.Add(path);
+                    if (!rootNames.TryGetValue(path, out var names)) rootNames[path] = names = new(StringComparer.Ordinal);
+                    names.Add(project.Name);
+                }
+            }
 
         var normalized = new List<CatalogSession>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -146,6 +181,14 @@ public sealed class WorkspaceCatalogService(Logger? logger = null)
         if (string.IsNullOrWhiteSpace(path)) return null;
         try { return SessionProjectCatalog.NormalizeWorkingDirectory(path); }
         catch (Exception ex) when (ex is IOException or ArgumentException or NotSupportedException) { return null; }
+    }
+
+    private static JsonElement ScopedState(JsonElement json, string key)
+    {
+        var scoped = json.EnumerateObject().Where(p => p.Name.StartsWith("electron-owner-value:" + key + ":", StringComparison.Ordinal)).ToArray();
+        // Do not combine metadata belonging to different signed-in owners.
+        if (scoped.Length > 0) return scoped.Length == 1 ? scoped[0].Value : default;
+        return json.TryGetProperty(key, out var value) ? value : default;
     }
 
     private static bool Within(string path, string root) => path.Equals(root, StringComparison.OrdinalIgnoreCase)

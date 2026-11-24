@@ -80,9 +80,22 @@ if (args.Contains("app-server"))
             } : new object[] { new { id = "00000000-0000-0000-0000-000000000001", cwd = projectDirectory, name = "Project chat", updatedAt = 100 } };
             Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { id = id.GetInt32(), result = new { data, nextCursor = second && mode != "repeat" ? null : "page-2" } }));
         }
+        else if (method == "project/list")
+        {
+            var profileHome = Environment.GetEnvironmentVariable("CODEX_HOME")!;
+            var modeFile = Path.Combine(profileHome, "catalog-mode.txt");
+            var mode = File.Exists(modeFile) ? File.ReadAllText(modeFile) : "";
+            if (mode == "project-error") { Console.WriteLine(JsonSerializer.Serialize(new { id = id.GetInt32(), error = new { code = -32601 } })); continue; }
+            if (mode == "project-invalid") { Console.WriteLine(JsonSerializer.Serialize(new { id = id.GetInt32(), result = new { data = new[] { new { id = "bad" } } } })); continue; }
+            var second = json.GetProperty("params").GetProperty("cursor").ValueKind == JsonValueKind.String;
+            var projectRoot = mode == "posix" ? @"\\wsl.localhost\Fixture-A\home\user\project" : profileHome;
+            var data = new[] { new { id = "current-project", name = mode == "renamed" ? "Renamed project" : "Current project", roots = new[] { new { path = projectRoot } } } };
+            Console.WriteLine(JsonSerializer.Serialize(new { id = id.GetInt32(), result = new { data, nextCursor = second && mode != "project-repeat" ? null : "project-page-2" } }));
+        }
         else if (method is "thread/start" or "thread/resume")
         {
             var parameters = json.GetProperty("params");
+            if (method == "thread/resume" && (!parameters.TryGetProperty("excludeTurns", out var exclude) || !exclude.GetBoolean())) return 46;
             if (parameters.TryGetProperty("sandbox", out var sandbox) && sandbox.GetString() is not ("danger-full-access" or "read-only" or "workspace-write")) return 45;
             var threadId = parameters.TryGetProperty("threadId", out var tid) ? tid.GetString() : "00000000-0000-0000-0000-000000000003";
             Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { id = id.GetInt32(), result = new { thread = new { id = threadId } } }));
@@ -1201,6 +1214,7 @@ tests.Add(("managed CLI resume, send, approval, steer, interrupt and stop use pe
 }));
 AutomationTransportTests.Register(tests, root);
 DesktopProjectNameTests.Register(tests, root);
+CurrentWorkspaceTests.Register(tests, root);
 var sessionTestStart = tests.Count;
 SessionStoreTests.Register(tests, root);
 var selectedTests = args.Contains("--session-store-tests") ? tests.Skip(sessionTestStart).ToArray() : tests.ToArray();

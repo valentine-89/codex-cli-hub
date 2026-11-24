@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.12.6 — 2026-11-24
+
+- Support verified state migrations 62–64 for offline shared-session maintenance and profile deletion. Preserve attached-parent, session model-ID and listing metadata; unknown schemas, changed triggers and active clients still block writes.
+- Read current project names and roots through paginated `project/list`. Desktop's retired JSON project cache no longer overrides renames or restores deleted projects. Keep the whole last successful catalog when either listing API fails.
+- Resolve only explicitly pending legacy project assignments through the current host's migration mapping; read owner-scoped projectless metadata without mixing owners.
+- Resume managed sessions with `excludeTurns` to avoid the deprecated full-history response.
+- Validate CLI 0.170.0 and Desktop backend 0.171.0-alpha.13 with plain/compressed fixtures, project rename, profile deletion, archive/unarchive and metadata preservation.
+
 ## 1.12.5 — 2026-11-01
 
 - Show Desktop project names from `local-projects` for every matching root, including WSL paths whose folder names differ after a project rename. Refresh rereads the saved name.

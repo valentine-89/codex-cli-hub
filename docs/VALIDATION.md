@@ -1,4 +1,25 @@
-# Validation — v1.12.5, 2026-11-01
+# Validation — v1.12.6, 2026-11-24
+
+- **99/99 .NET regression tests and 4/4 Python maintenance tests passed.** Release build has
+  zero warnings/errors. Coverage includes paginated project discovery, rename refresh, unavailable/
+  malformed/repeating project responses, complete-cache preservation, pending assignment migration,
+  owner-scoped output directories and unchanged GUI resume targets.
+- Reproduced 1.12.5's schema-64 rejection in an isolated fixture. Required path columns and five
+  thread triggers remain unchanged. Migrations 62–64 add attached-parent metadata, session model
+  IDs and listing indexes. Tests now verify their preservation and reject schema 65.
+- **CLI 0.170.0** and **Desktop backend 0.171.0-alpha.13** passed four plain/compressed fixture
+  combinations: project rename/listing, cross-profile read/resume without a model turn, live-client
+  guards, stale-alias missing-list/archive reproduction, repair, profile deletion, archive/unarchive,
+  transcript hashes, all non-path thread columns, session model IDs and repeat-repair idempotence.
+- Live read-only inspection: schema 64, successful migrations, `quick_check=ok`, 402 thread rows,
+  16 profile aliases, six broken aliases and zero other validation issues. The corrected catalog
+  retains 39 directory choices, 138 visible sessions and six projectless sessions with no warning;
+  both installed binaries return 30 current API projects. Quota refresh for one current profile
+  returned three quota lines without error. No credential values were printed.
+- Six broken aliases remain pending offline repair while clients are active. No real thread was
+  resumed/archived, no model turn was sent, and no real account deletion or database repair occurred.
+
+## Previous validation — v1.12.5, 2026-11-01
 
 - **96/96 .NET regression tests and 4/4 Python maintenance tests passed.** New coverage verifies
   project rename refresh, multiple Windows/WSL roots, Unicode labels, exact-root matching,

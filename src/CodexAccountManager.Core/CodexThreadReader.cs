@@ -4,11 +4,22 @@ using System.Text.Json;
 
 namespace CodexAccountManager.Core;
 
+public sealed record CodexProject(string Id, string Name, IReadOnlyList<string> Roots);
+internal sealed record CodexWorkspace(IReadOnlyList<CatalogSession> Sessions, IReadOnlyList<CodexProject> Projects);
+
 // A short-lived, local stdio connection. Listing does not load a thread or start a turn.
 public sealed class CodexThreadReader(Logger? logger = null)
 {
     public async Task<IReadOnlyList<CatalogSession>> ReadAsync(Dependencies dependencies, string profileHome,
         string sharedHome, CancellationToken cancellationToken = default)
+        => (await ReadCore(dependencies, profileHome, sharedHome, false, cancellationToken)).Sessions;
+
+    internal Task<CodexWorkspace> ReadWorkspaceAsync(Dependencies dependencies, string profileHome,
+        string sharedHome, CancellationToken cancellationToken = default)
+        => ReadCore(dependencies, profileHome, sharedHome, true, cancellationToken);
+
+    private async Task<CodexWorkspace> ReadCore(Dependencies dependencies, string profileHome,
+        string sharedHome, bool includeProjects, CancellationToken cancellationToken)
     {
         if (dependencies.NativeCodex is null) throw new IOException("Codex executable unavailable for session discovery.");
         PathSafety.OrdinaryDirectory(profileHome);
@@ -34,7 +45,8 @@ public sealed class CodexThreadReader(Logger? logger = null)
         var version = "unknown";
         try
         {
-            await Send(new { id = 1, method = "initialize", @params = new { clientInfo = new { name = "codex_account_manager", version = "1.12.5" } } });
+            await Send(new { id = 1, method = "initialize", @params = new { clientInfo = new { name = "codex_account_manager", version = "1.12.6" },
+                capabilities = new { experimentalApi = true } } });
             var initialized = await Receive(1);
             var match = System.Text.RegularExpressions.Regex.Match(Text(initialized, "userAgent") ?? "", @"^[^/\s]+/([0-9][0-9A-Za-z.+-]{0,63})(?:\s|$)");
             if (match.Success) version = match.Groups[1].Value;
@@ -61,7 +73,30 @@ public sealed class CodexThreadReader(Logger? logger = null)
                 cursor = Text(result, "nextCursor");
                 if (cursor is not null && !cursors.Add(cursor)) throw new IOException("Codex repeated a session page.");
             } while (cursor is not null);
-            return WorkspacePaths.RestorePosixDirectories(sharedHome, sessions.Values.ToArray(), cancellationToken);
+            var projects = new Dictionary<string, CodexProject>(StringComparer.Ordinal);
+            if (includeProjects)
+            {
+                method = "project/list"; cursor = null; cursors.Clear();
+                do
+                {
+                    await Send(new { id = requestId, method, @params = new { cursor, limit = 100 } });
+                    var result = await Receive(requestId++);
+                    if (!result.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array)
+                        throw new IOException("Invalid Codex project list.");
+                    foreach (var row in data.EnumerateArray())
+                    {
+                        var id = Text(row, "id"); var name = Text(row, "name");
+                        if (id is null || name is null || !row.TryGetProperty("roots", out var roots) || roots.ValueKind != JsonValueKind.Array)
+                            throw new IOException("Invalid Codex project metadata.");
+                        var paths = roots.EnumerateArray().Select(r => Text(r, "path")
+                            ?? throw new IOException("Invalid Codex project root.")).ToArray();
+                        projects[id] = new(id, name, paths);
+                    }
+                    cursor = Text(result, "nextCursor");
+                    if (cursor is not null && !cursors.Add(cursor)) throw new IOException("Codex repeated a project page.");
+                } while (cursor is not null);
+            }
+            return new(WorkspacePaths.RestorePosixDirectories(sharedHome, sessions.Values.ToArray(), cancellationToken), projects.Values.ToArray());
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {

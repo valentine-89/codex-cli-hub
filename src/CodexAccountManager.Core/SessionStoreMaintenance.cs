@@ -103,10 +103,10 @@ public sealed class SessionStoreMaintenance
     {
         var migration = db.Query("SELECT MAX(version), SUM(CASE WHEN success=0 THEN 1 ELSE 0 END) FROM _sqlx_migrations").Single();
         if (migration[1] != "0") throw new IOException("Codex session migration is incomplete. No changes allowed.");
-        // 60 adds guardian review feedback; 61 adds thread read state. Neither
-        // changes the threads path columns or their update triggers.
-        if (!int.TryParse(migration[0], out var version) || version is < 59 or > 61)
-            throw new IOException($"Unsupported Codex session schema {migration[0] ?? "unknown"}. Supported migrations: 59-61. No changes allowed.");
+        // 60-64 add guardian/read state, attached parents, session model IDs and
+        // listing indexes. Verified path columns and path-update triggers are unchanged.
+        if (!int.TryParse(migration[0], out var version) || version is < 59 or > 64)
+            throw new IOException($"Unsupported Codex session schema {migration[0] ?? "unknown"}. Supported migrations: 59-64. No changes allowed.");
         var columns = db.Query("PRAGMA table_info(threads)").ToDictionary(r => r[1]!, r => r);
         foreach (var (name, type) in new[] { ("id", "TEXT"), ("rollout_path", "TEXT"), ("archived", "INTEGER") })
             if (!columns.TryGetValue(name, out var column) || !string.Equals(column[2], type, StringComparison.OrdinalIgnoreCase)
